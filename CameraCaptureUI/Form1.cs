@@ -102,7 +102,7 @@ namespace CameraCaptureUI
 
         private void button4_Click(object sender, EventArgs e)
         {
-            CameraInterop.StopRecording();
+            CameraInterop.StopPreview();
         }
     }
 }
