@@ -23,7 +23,7 @@ extern "C" {
     __declspec(dllexport) void GetMicrophoneName(int index, wchar_t* nameBuffer, int bufferLength);
 
     // Control de grabación
-    __declspec(dllexport) bool StartRecording(int videoIndex, int audioIndex, const wchar_t* outputPath);
+    __declspec(dllexport) bool StartRecording(int camIndex, const wchar_t* outputPath);
     __declspec(dllexport) bool PauseRecording();
     __declspec(dllexport) bool ResumeRecording();
     __declspec(dllexport) bool StopRecording();

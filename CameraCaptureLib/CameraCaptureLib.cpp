@@ -317,140 +317,88 @@ void PrintMediaType(IMFMediaType* pType) {
     }
 }
 
+#define CHECK_HR(hr, msg) if (FAILED(hr)) { std::wcout << L"Error: " << msg << L" (0x" << std::hex << hr << L")" << std::endl; return hr; }
 
+#ifndef SAFE_RELEASE
+#define SAFE_RELEASE(x) if ((x) != nullptr) { (x)->Release(); (x) = nullptr; }
+#endif
 // --- Lógica interna de grabación ---
-bool StartRecording(int videoIndex, int audioIndex, const wchar_t* outputPath) {
-    StopPreview();
+bool StartRecording(int videoIndex, const wchar_t* outputPath) {
     HRESULT hr = S_OK;
 
-    // 1. Activar fuentes de video/audio
+    // 1. Activar la fuente de video
     hr = g_ppDevices[videoIndex]->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource));
     if (FAILED(hr)) return false;
 
-    hr = g_audioDevices[audioIndex]->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource));
-    if (FAILED(hr)) return false;
-
-    // 2. Crear SourceReaders
+    // 2. Crear SourceReader
     hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource, nullptr, &g_ctx.videoReader);
     if (FAILED(hr)) return false;
 
-    hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader);
+    // 3. Obtener el tipo nativo de la cámara
+    IMFMediaType* nativeType = nullptr;
+    hr = g_ctx.videoReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &nativeType);
     if (FAILED(hr)) return false;
 
-    // 2.1 Establecer tipo de salida deseado (video NV12)
-    IMFMediaType* videoRequestType = nullptr;
-    MFCreateMediaType(&videoRequestType);
-    videoRequestType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    videoRequestType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-    g_ctx.videoReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, videoRequestType);
-    videoRequestType->Release();
-
-    // 2.2 Establecer tipo deseado para audio PCM
-    IMFMediaType* audioRequestType = nullptr;
-    MFCreateMediaType(&audioRequestType);
-    audioRequestType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    audioRequestType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    g_ctx.audioReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, audioRequestType);
-    audioRequestType->Release();
-
-    // 3. Crear SinkWriter
-    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, nullptr, &g_ctx.sinkWriter);
-    if (FAILED(hr)) return false;
-
-    // 4. MediaType salida video (H264)
-    IMFMediaType* videoOutType = nullptr;
-    MFCreateMediaType(&videoOutType);
-    videoOutType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    videoOutType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-    videoOutType->SetUINT32(MF_MT_AVG_BITRATE, 8000000);
-    videoOutType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    MFSetAttributeSize(videoOutType, MF_MT_FRAME_SIZE, 1280, 720);
-    MFSetAttributeRatio(videoOutType, MF_MT_FRAME_RATE, 30, 1);
-    MFSetAttributeRatio(videoOutType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    hr = g_ctx.sinkWriter->AddStream(videoOutType, &g_ctx.videoStreamIndex);
-    videoOutType->Release();
-    if (FAILED(hr)) return false;
-
-    // 5. MediaType entrada video (NV12)
-    IMFMediaType* videoInType = nullptr;
-    MFCreateMediaType(&videoInType);
-    videoInType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    videoInType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-    MFSetAttributeSize(videoInType, MF_MT_FRAME_SIZE, 1280, 720);
-    MFSetAttributeRatio(videoInType, MF_MT_FRAME_RATE, 30, 1);
-    MFSetAttributeRatio(videoInType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.videoStreamIndex, videoInType, nullptr);
-    std::cout << "MFCreateSourceReaderFromMediaSource (video) HR: FFFFasdasd " << hr << std::endl;
-    videoInType->Release();
-    if (FAILED(hr)) return false;
-
-    // 6. MediaType salida audio (AAC)
-    IMFMediaType* audioOutType = nullptr;
-    MFCreateMediaType(&audioOutType);
-    if (FAILED(hr)) return false;
-    audioOutType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    audioOutType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-    audioOutType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    audioOutType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 16000);
-    audioOutType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 1);
-    audioOutType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 96000);
-    audioOutType->SetUINT32(MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29); // AAC LC
-    hr = g_ctx.sinkWriter->AddStream(audioOutType, &g_ctx.audioStreamIndex);
-    audioOutType->Release();
-    if (FAILED(hr)) return false;
-    std::cout << "MFCreateSourceReaderFromMediaSource (video) HR: 333 " << hr << std::endl;
-    // 7. MediaType entrada audio (PCM)
-    IMFMediaType* audioSourceType = nullptr;
-    hr = g_ctx.audioReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &audioSourceType);
-    if (FAILED(hr)) return false;
-
-    PrintMediaType(audioSourceType);
-
-    // 7.1 Copiar como tipo de entrada del SinkWriter
-    IMFMediaType* audioInType = nullptr;
-    hr = MFCreateMediaType(&audioInType);
-    if (FAILED(hr)) return false;
-
-    audioInType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    audioInType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    audioInType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 1);
-    audioInType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 16000);
-    audioInType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    audioInType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 2); // channels * (bits/8)
-    audioInType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 32000);
-    audioInType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
-    audioSourceType->Release();
-    if (FAILED(hr)) return false;
-
-    // Asegurar GUIDs correctos
-    audioInType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    audioInType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    audioInType->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
-
-    PrintMediaType(audioInType);
-
-    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.audioStreamIndex, audioInType, nullptr);
-    audioInType->Release();
+    hr = g_ctx.videoReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeType);
     if (FAILED(hr)) {
-        std::cout << "MFCreateSourceReaderFromMediaSource (video) HR: 333 " << hr << std::endl;
+        nativeType->Release();
         return false;
     }
-    std::cout << "MFCreateSourceReaderFromMediaSource (video) HR: 333xzcvd " << hr << std::endl;
-    // 8. Comenzar grabación
+
+    // 4. Crear SinkWriter
+    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, nullptr, &g_ctx.sinkWriter);
+    if (FAILED(hr)) {
+        nativeType->Release();
+        return false;
+    }
+
+    // 5. Tipo de salida (H264)
+    IMFMediaType* outType = nullptr;
+    hr = MFCreateMediaType(&outType);
+    if (FAILED(hr)) {
+        nativeType->Release();
+        return false;
+    }
+
+    outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    outType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+    outType->SetUINT32(MF_MT_AVG_BITRATE, 8000000);
+    outType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+
+    UINT32 width = 0, height = 0;
+    MFGetAttributeSize(nativeType, MF_MT_FRAME_SIZE, &width, &height);
+    MFSetAttributeSize(outType, MF_MT_FRAME_SIZE, width, height);
+
+    UINT32 num = 0, den = 0;
+    MFGetAttributeRatio(nativeType, MF_MT_FRAME_RATE, &num, &den);
+    MFSetAttributeRatio(outType, MF_MT_FRAME_RATE, num, den);
+    MFSetAttributeRatio(outType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+
+    hr = g_ctx.sinkWriter->AddStream(outType, &g_ctx.videoStreamIndex);
+    outType->Release();
+    if (FAILED(hr)) {
+        nativeType->Release();
+        return false;
+    }
+
+    // 6. Configurar tipo de entrada (igual que el tipo nativo)
+    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.videoStreamIndex, nativeType, nullptr);
+    nativeType->Release();
+    if (FAILED(hr)) return false;
+
+    // 7. Iniciar la escritura
     hr = g_ctx.sinkWriter->BeginWriting();
     if (FAILED(hr)) return false;
-    std::cout << "MFCreateSourceReaderFromMediaSource (video) HR: " << hr << std::endl;
 
     g_ctx.isRecording = true;
     g_ctx.isPaused = false;
 
+    // 8. Hilo de escritura
     g_ctx.recordingThread = std::thread([] {
         DWORD streamIndex = 0;
         DWORD flags = 0;
-        LONGLONG videoRtStart = 0;
-        LONGLONG audioRtStart = 0;
-        const LONGLONG videoFrameDuration = 333333; // 30 fps
-        const LONGLONG audioSampleDuration = 100000; // ~10ms
+        LONGLONG rtStart = 0;
+        const LONGLONG frameDuration = 333333; // 30 fps
 
         while (g_ctx.isRecording) {
             if (g_ctx.isPaused) {
@@ -459,38 +407,34 @@ bool StartRecording(int videoIndex, int audioIndex, const wchar_t* outputPath) {
             }
 
             IMFSample* pSample = nullptr;
+            HRESULT hr = g_ctx.videoReader->ReadSample(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, nullptr, &pSample);
 
-            // Video
-            HRESULT hr = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, nullptr, &pSample);
-            if (SUCCEEDED(hr) && pSample) {
-                pSample->SetSampleTime(videoRtStart);
-                pSample->SetSampleDuration(videoFrameDuration);
+            if (FAILED(hr)) {
+                std::cout << "[ERROR] ReadSample failed: 0x" << std::hex << hr << "\n";
+                break;
+            }
+
+            if (pSample) {
+                pSample->SetSampleTime(rtStart);
+                pSample->SetSampleDuration(frameDuration);
                 g_ctx.sinkWriter->WriteSample(g_ctx.videoStreamIndex, pSample);
-                videoRtStart += videoFrameDuration;
+                rtStart += frameDuration;
                 pSample->Release();
             }
-
-            // Audio
-            pSample = nullptr;
-            hr = g_ctx.audioReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIndex, &flags, nullptr, &pSample);
-            if (SUCCEEDED(hr) && pSample) {
-                pSample->SetSampleTime(audioRtStart);
-                pSample->SetSampleDuration(audioSampleDuration);
-                g_ctx.sinkWriter->WriteSample(g_ctx.audioStreamIndex, pSample);
-                audioRtStart += audioSampleDuration;
-                pSample->Release();
+            else {
+                std::cout << "[INFO] No sample available\n";
             }
-
-            Sleep(1);
         }
 
-        g_ctx.sinkWriter->Finalize();
-        g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr;
-        g_ctx.videoReader->Release(); g_ctx.videoReader = nullptr;
-        g_ctx.audioReader->Release(); g_ctx.audioReader = nullptr;
-        g_ctx.videoSource->Release(); g_ctx.videoSource = nullptr;
-        g_ctx.audioSource->Release(); g_ctx.audioSource = nullptr;
-    });
+        std::cout << "[INFO] Finalizing SinkWriter\n";
+        if (g_ctx.sinkWriter) g_ctx.sinkWriter->Finalize();
+        std::cout << "[INFO] SinkWriter finalized\n";
+
+        if (g_ctx.sinkWriter) { g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr; }
+        if (g_ctx.videoReader) { g_ctx.videoReader->Release(); g_ctx.videoReader = nullptr; }
+        if (g_ctx.videoSource) { g_ctx.videoSource->Release(); g_ctx.videoSource = nullptr; }
+        });
 
     return true;
 }
@@ -508,19 +452,16 @@ bool ResumeRecorder() {
 }
 
 bool StopRecorder() {
-    if (!g_ctx.isRecording) return false;
+    if (!g_ctx.isRecording)
+        return false;
+
     g_ctx.isRecording = false;
     g_ctx.isPaused = false;
 
-    // Liberar recursos si estuvieran asignados
-    if (g_ctx.videoReader) { g_ctx.videoReader->Release(); g_ctx.videoReader = nullptr; }
-    if (g_ctx.audioReader) { g_ctx.audioReader->Release(); g_ctx.audioReader = nullptr; }
-    if (g_ctx.sinkWriter) { g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr; }
-    if (g_ctx.videoSource) { g_ctx.videoSource->Release(); g_ctx.videoSource = nullptr; }
-    if (g_ctx.audioSource) { g_ctx.audioSource->Release(); g_ctx.audioSource = nullptr; }
-
     if (g_ctx.recordingThread.joinable())
         g_ctx.recordingThread.join();
+
+    // Recursos ya se liberan en el hilo de grabación
 
     return true;
 }

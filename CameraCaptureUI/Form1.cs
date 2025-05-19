@@ -73,8 +73,8 @@ namespace CameraCaptureUI
 
         private void button1_Click(object sender, EventArgs e)
         {
-            var videoIndex = ((CameraItem)comboBoxCameras.SelectedItem).Index;
-            var audioIndex = ((CameraItem)comboBoxMicrophones.SelectedItem).Index;
+            var camIndex = ((CameraItem)comboBoxCameras.SelectedItem).Index;
+            var micIndex = ((CameraItem)comboBoxMicrophones.SelectedItem).Index;
 
 
             using (var saveDialog = new SaveFileDialog())
@@ -84,7 +84,7 @@ namespace CameraCaptureUI
 
                 if (saveDialog.ShowDialog() == DialogResult.OK)
                 {
-                    CameraInterop.StartRecording(videoIndex, audioIndex, saveDialog.FileName);
+                    CameraInterop.StartRecording(camIndex, saveDialog.FileName);
                     
                 }
             }
@@ -102,7 +102,7 @@ namespace CameraCaptureUI
 
         private void button4_Click(object sender, EventArgs e)
         {
-            CameraInterop.StopPreview();
+            CameraInterop.StopRecording();
         }
     }
 }
@@ -133,7 +133,7 @@ public static class CameraInterop
     public static extern void GetMicrophoneName(int index, [Out] char[] nameBuffer, int nameBufferSize);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartRecording(int videoDeviceIndex, int audioDeviceIndex, string outputPath);
+    public static extern bool StartRecording(int videoDeviceIndex, string outputPath);
 
     [DllImport("CameraCaptureLib.dll")]
     public static extern bool PauseRecording();
