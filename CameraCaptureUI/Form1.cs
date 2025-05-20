@@ -84,7 +84,7 @@ namespace CameraCaptureUI
 
                 if (saveDialog.ShowDialog() == DialogResult.OK)
                 {
-                    CameraInterop.StartRecording(camIndex, saveDialog.FileName);
+                    CameraInterop.StartRecording(camIndex, micIndex, saveDialog.FileName);
                     
                 }
             }
@@ -133,7 +133,7 @@ public static class CameraInterop
     public static extern void GetMicrophoneName(int index, [Out] char[] nameBuffer, int nameBufferSize);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartRecording(int videoDeviceIndex, string outputPath);
+    public static extern bool StartRecording(int videoDeviceIndex, int audioDevice, string outputPath);
 
     [DllImport("CameraCaptureLib.dll")]
     public static extern bool PauseRecording();
