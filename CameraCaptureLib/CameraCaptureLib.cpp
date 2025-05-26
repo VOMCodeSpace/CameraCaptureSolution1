@@ -34,7 +34,6 @@ std::thread audioThread;
 
 std::mutex mtx;
 std::condition_variable cv;
-bool stopRequested = false;
 
 // --- Variables globales para preview ---
 static IMFMediaSource* g_pSource = nullptr;
@@ -68,11 +67,17 @@ bool InitializeRecorder(int videoIndex, int audioIndex, const wchar_t* outputPat
 bool PauseRecorder();
 bool ResumeRecorder();
 
+void ResetContext() {
+    g_ctx.videoStreamIndex = 0;
+    g_ctx.audioStreamIndex = 0;
+    g_ctx.baseTime = -1;
+}
+
 bool StopRecorder() {
     if (!g_ctx.isRecording) return false;
 
     g_ctx.isRecording = false;  // Señal a los hilos para terminar
-    g_ctx.isPaused = true;
+    g_ctx.isPaused = false;
 
     // Esperar que los hilos terminen
     if (g_ctx.recordingThread.joinable()) g_ctx.recordingThread.join();
@@ -81,7 +86,7 @@ bool StopRecorder() {
     HRESULT hr = S_OK;
 
     if (g_ctx.sinkWriter) {
-        hr = g_ctx.sinkWriter->Finalize();  // Finaliza y cierra el archivo correctamente
+        hr = g_ctx.sinkWriter->Finalize();
         if (FAILED(hr)) {
             std::cout << "[ERROR] SinkWriter->Finalize falló: 0x" << std::hex << hr << "\n";
         }
@@ -110,6 +115,8 @@ bool StopRecorder() {
         g_ctx.audioSource->Release();
         g_ctx.audioSource = nullptr;
     }
+
+    ResetContext();
 
     std::cout << "[INFO] Grabación detenida correctamente.\n";
     return true;
@@ -326,8 +333,6 @@ void StopPreview() {
 
 }
 
-
-
 bool PauseRecording() {
     return g_ctx.isRecording ? PauseRecorder() : false;
 }
@@ -375,30 +380,96 @@ void PrintMediaType(IMFMediaType* pType) {
     }
 }
 
-// --- Lógica interna de grabación ---
-bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
-    HRESULT hr = S_OK;
+HRESULT GetCameraDeviceActivate(UINT32 camIndex, IMFActivate** ppActivate) {
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (FAILED(hr)) return hr;
 
-    IMFMediaType* nativeVideoType = nullptr;
-    IMFMediaType* nativeAudioType = nullptr;
-    IMFMediaType* outVideoType = nullptr;
-    IMFMediaType* outAudioType = nullptr;
-    UINT32 num = 0, den = 0;
-    UINT32 width = 0, height = 0;
+    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (FAILED(hr)) goto done;
 
+    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
+    if (FAILED(hr)) goto done;
 
-    if (g_ctx.isRecording.load()) {
-        std::cout << "[ERROR] Ya hay una grabación activa\n";
-        return false;
+    if (camIndex >= count) {
+        hr = E_INVALIDARG;
+        goto done;
     }
 
-    stopRequested = false;
+    *ppActivate = ppDevices[camIndex];
+    (*ppActivate)->AddRef();
 
-    // 1. Activar dispositivos
-    hr = g_ppDevices[camIndex]->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource));
+done:
+    for (UINT32 i = 0; i < count; ++i)
+        if (ppDevices[i]) ppDevices[i]->Release();
+    CoTaskMemFree(ppDevices);
+    if (pAttributes) pAttributes->Release();
+    return hr;
+}
+
+HRESULT GetAudioDeviceActivate(UINT32 micIndex, IMFActivate** ppActivate) {
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (FAILED(hr)) return hr;
+
+    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID);
+    if (FAILED(hr)) goto done;
+
+    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
+    if (FAILED(hr)) goto done;
+
+    if (micIndex >= count) {
+        hr = E_INVALIDARG;
+        goto done;
+    }
+
+    *ppActivate = ppDevices[micIndex];
+    (*ppActivate)->AddRef();
+
+done:
+    for (UINT32 i = 0; i < count; ++i)
+        if (ppDevices[i]) ppDevices[i]->Release();
+    CoTaskMemFree(ppDevices);
+    if (pAttributes) pAttributes->Release();
+    return hr;
+}
+
+// --- Lógica interna de grabación ---
+bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
+    ResetContext();
+    
+    HRESULT hr = S_OK;
+
+    UINT32 num = 0, den = 0;
+    UINT32 width = 320, height = 180;
+    IMFAttributes* pAttributes = nullptr;
+
+    IMFMediaType* nativeVideoType = nullptr;
+    IMFMediaType* outVideoType = nullptr;
+    IMFActivate* pVideoActivate = nullptr;
+
+    IMFMediaType* nativeAudioType = nullptr;
+    IMFMediaType* outAudioType = nullptr;
+    IMFActivate* pAudioActivate = nullptr;
+
+    if (g_ctx.isRecording.load()) return false;
+
+    hr = GetCameraDeviceActivate(camIndex, &pVideoActivate);
     if (FAILED(hr)) goto error;
 
-    hr = g_audioDevices[micIndex]->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource));
+    hr = pVideoActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource));
+    pVideoActivate->Release();
+    if (FAILED(hr)) goto error;
+
+    hr = GetAudioDeviceActivate(micIndex, &pAudioActivate);
+    if (FAILED(hr)) goto error;
+
+    hr = pAudioActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource));
+    pAudioActivate->Release();
     if (FAILED(hr)) goto error;
 
     // 2. Crear SourceReaders
@@ -422,55 +493,58 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
     hr = g_ctx.audioReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, nativeAudioType);
     if (FAILED(hr)) goto error;
 
+    hr = MFCreateAttributes(&pAttributes, 1); if (FAILED(hr)) return hr;
+
+    // Habilitar CBR explícitamente
+    hr = pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE); // Opcional, para usar HW
+    hr = pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE); // Opcional, si es necesario
+
     // 5. Crear SinkWriter
-    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, nullptr, &g_ctx.sinkWriter);
-    if (FAILED(hr)) goto error;
+    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, pAttributes, &g_ctx.sinkWriter); if (FAILED(hr)) goto error;
 
     // 6. Configurar tipo salida video (H264)
-    hr = MFCreateMediaType(&outVideoType);
-    if (FAILED(hr)) goto error;
+    hr = MFCreateMediaType(&outVideoType); if (FAILED(hr)) goto error;
 
     hr = outVideoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); if (FAILED(hr)) goto error;
     hr = outVideoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264); if (FAILED(hr)) goto error;
-    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, 8000000); if (FAILED(hr)) goto error;
+    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, 128000); if (FAILED(hr)) goto error;
     hr = outVideoType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive); if (FAILED(hr)) goto error;
 
-    MFGetAttributeSize(nativeVideoType, MF_MT_FRAME_SIZE, &width, &height);
-    MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, width, height);
+    hr = MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, 24, 1); if (FAILED(hr)) goto error;
+    hr = MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1); if (FAILED(hr)) goto error;
+    hr = MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, 640, 360); if (FAILED(hr)) goto error;
 
+
+    // MFGetAttributeSize(nativeVideoType, MF_MT_FRAME_SIZE, &width, &height);
+    MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, width, height);
     MFGetAttributeRatio(nativeVideoType, MF_MT_FRAME_RATE, &num, &den);
-    if (num == 0 || den == 0) { num = 30; den = 1; } // fallback
+
+    if (num == 0 || den == 0) { num = 30; den = 1; }
     MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, num, den);
     MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 
-    hr = g_ctx.sinkWriter->AddStream(outVideoType, &g_ctx.videoStreamIndex);
-    if (FAILED(hr)) goto error;
+    hr = g_ctx.sinkWriter->AddStream(outVideoType, &g_ctx.videoStreamIndex); if (FAILED(hr)) goto error;
 
-    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.videoStreamIndex, nativeVideoType, nullptr);
-    if (FAILED(hr)) goto error;
+    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.videoStreamIndex, nativeVideoType, nullptr); if (FAILED(hr)) goto error;
 
     // 7. Configurar salida audio (AAC)
-    hr = MFCreateMediaType(&outAudioType);
-    if (FAILED(hr)) goto error;
+    hr = MFCreateMediaType(&outAudioType); if (FAILED(hr)) goto error;
 
     hr = outAudioType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio); if (FAILED(hr)) goto error;
     hr = outAudioType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC); if (FAILED(hr)) goto error;
+
     hr = outAudioType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100); if (FAILED(hr)) goto error;
     hr = outAudioType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2); if (FAILED(hr)) goto error;
     hr = outAudioType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16); if (FAILED(hr)) goto error;
     hr = outAudioType->SetUINT32(MF_MT_AVG_BITRATE, 128000); if (FAILED(hr)) goto error;
     hr = outAudioType->SetUINT32(MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29); if (FAILED(hr)) goto error;
 
-    hr = g_ctx.sinkWriter->AddStream(outAudioType, &g_ctx.audioStreamIndex);
-    if (FAILED(hr)) goto error;
+    hr = g_ctx.sinkWriter->AddStream(outAudioType, &g_ctx.audioStreamIndex); if (FAILED(hr)) goto error;
 
-    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.audioStreamIndex, nativeAudioType, nullptr);
-    if (FAILED(hr)) goto error;
+    hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.audioStreamIndex, nativeAudioType, nullptr); if (FAILED(hr)) goto error;
 
     // 8. Iniciar escritura
-    hr = g_ctx.sinkWriter->BeginWriting();
-    if (FAILED(hr)) goto error;
-
+    hr = g_ctx.sinkWriter->BeginWriting(); if (FAILED(hr)) goto error;
     g_ctx.isRecording = true; // se marca antes de lanzar los hilos
 
     // 9. Hilo de video
@@ -486,8 +560,8 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
             }
 
             IMFSample* pSample = nullptr;
-            HRESULT hr = g_ctx.videoReader->ReadSample(
-                MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
+            HRESULT hr = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
+
             if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
             if (pSample) {
@@ -515,8 +589,7 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
             }
 
             IMFSample* pSample = nullptr;
-            HRESULT hr = g_ctx.audioReader->ReadSample(
-                MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
+            HRESULT hr = g_ctx.audioReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
             if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
             if (pSample) {
@@ -556,10 +629,11 @@ error:
     if (g_ctx.audioReader) { g_ctx.audioReader->Release(); g_ctx.audioReader = nullptr; }
     if (g_ctx.sinkWriter) { g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr; }
 
+    ResetContext();
+
     std::cout << "[ERROR] StartRecording falló con hr=0x" << std::hex << hr << "\n";
     return false;
 }
-
 
 bool PauseRecorder() {
     g_ctx.isPaused = true;

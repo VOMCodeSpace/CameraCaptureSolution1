@@ -36,20 +36,23 @@
             this.button3 = new System.Windows.Forms.Button();
             this.button4 = new System.Windows.Forms.Button();
             this.comboBoxMicrophones = new System.Windows.Forms.ComboBox();
+            this.comboBoxCameras2 = new System.Windows.Forms.ComboBox();
+            this.pictureBox1 = new System.Windows.Forms.PictureBox();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxPreview)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.SuspendLayout();
             // 
             // comboBoxCameras
             // 
             this.comboBoxCameras.FormattingEnabled = true;
-            this.comboBoxCameras.Location = new System.Drawing.Point(174, 99);
+            this.comboBoxCameras.Location = new System.Drawing.Point(12, 60);
             this.comboBoxCameras.Name = "comboBoxCameras";
-            this.comboBoxCameras.Size = new System.Drawing.Size(237, 21);
+            this.comboBoxCameras.Size = new System.Drawing.Size(264, 21);
             this.comboBoxCameras.TabIndex = 0;
             // 
             // btnPreview
             // 
-            this.btnPreview.Location = new System.Drawing.Point(481, 99);
+            this.btnPreview.Location = new System.Drawing.Point(665, 60);
             this.btnPreview.Name = "btnPreview";
             this.btnPreview.Size = new System.Drawing.Size(75, 23);
             this.btnPreview.TabIndex = 1;
@@ -59,7 +62,7 @@
             // 
             // pictureBoxPreview
             // 
-            this.pictureBoxPreview.Location = new System.Drawing.Point(160, 153);
+            this.pictureBoxPreview.Location = new System.Drawing.Point(12, 136);
             this.pictureBoxPreview.Name = "pictureBoxPreview";
             this.pictureBoxPreview.Size = new System.Drawing.Size(264, 209);
             this.pictureBoxPreview.TabIndex = 2;
@@ -67,7 +70,7 @@
             // 
             // button1
             // 
-            this.button1.Location = new System.Drawing.Point(481, 153);
+            this.button1.Location = new System.Drawing.Point(665, 136);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(75, 23);
             this.button1.TabIndex = 3;
@@ -77,7 +80,7 @@
             // 
             // button2
             // 
-            this.button2.Location = new System.Drawing.Point(481, 181);
+            this.button2.Location = new System.Drawing.Point(665, 178);
             this.button2.Name = "button2";
             this.button2.Size = new System.Drawing.Size(75, 23);
             this.button2.TabIndex = 4;
@@ -87,7 +90,7 @@
             // 
             // button3
             // 
-            this.button3.Location = new System.Drawing.Point(481, 210);
+            this.button3.Location = new System.Drawing.Point(665, 207);
             this.button3.Name = "button3";
             this.button3.Size = new System.Drawing.Size(75, 23);
             this.button3.TabIndex = 5;
@@ -97,7 +100,7 @@
             // 
             // button4
             // 
-            this.button4.Location = new System.Drawing.Point(481, 239);
+            this.button4.Location = new System.Drawing.Point(665, 245);
             this.button4.Name = "button4";
             this.button4.Size = new System.Drawing.Size(75, 23);
             this.button4.TabIndex = 6;
@@ -108,16 +111,34 @@
             // comboBoxMicrophones
             // 
             this.comboBoxMicrophones.FormattingEnabled = true;
-            this.comboBoxMicrophones.Location = new System.Drawing.Point(174, 126);
+            this.comboBoxMicrophones.Location = new System.Drawing.Point(183, 100);
             this.comboBoxMicrophones.Name = "comboBoxMicrophones";
             this.comboBoxMicrophones.Size = new System.Drawing.Size(237, 21);
             this.comboBoxMicrophones.TabIndex = 7;
+            // 
+            // comboBoxCameras2
+            // 
+            this.comboBoxCameras2.FormattingEnabled = true;
+            this.comboBoxCameras2.Location = new System.Drawing.Point(322, 60);
+            this.comboBoxCameras2.Name = "comboBoxCameras2";
+            this.comboBoxCameras2.Size = new System.Drawing.Size(269, 21);
+            this.comboBoxCameras2.TabIndex = 8;
+            // 
+            // pictureBox1
+            // 
+            this.pictureBox1.Location = new System.Drawing.Point(322, 136);
+            this.pictureBox1.Name = "pictureBox1";
+            this.pictureBox1.Size = new System.Drawing.Size(269, 209);
+            this.pictureBox1.TabIndex = 9;
+            this.pictureBox1.TabStop = false;
             // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 450);
+            this.Controls.Add(this.pictureBox1);
+            this.Controls.Add(this.comboBoxCameras2);
             this.Controls.Add(this.comboBoxMicrophones);
             this.Controls.Add(this.button4);
             this.Controls.Add(this.button3);
@@ -130,6 +151,7 @@
             this.Text = "Form1";
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxPreview)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.ResumeLayout(false);
 
         }
@@ -144,6 +166,8 @@
         private System.Windows.Forms.Button button3;
         private System.Windows.Forms.Button button4;
         private System.Windows.Forms.ComboBox comboBoxMicrophones;
+        private System.Windows.Forms.ComboBox comboBoxCameras2;
+        private System.Windows.Forms.PictureBox pictureBox1;
     }
 }
 

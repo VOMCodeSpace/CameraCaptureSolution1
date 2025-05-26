@@ -39,10 +39,18 @@ namespace CameraCaptureUI
                 CameraInterop.GetCameraName(i, buffer, buffer.Length);
                 string name = new string(buffer).TrimEnd('\0');
                 comboBoxCameras.Items.Add(new CameraItem { Name = name, Index = i });
+                comboBoxCameras2.Items.Add(new CameraItem { Name = name, Index = i });
             }
 
             if (comboBoxCameras.Items.Count > 0)
                 comboBoxCameras.SelectedIndex = 0;
+            if (comboBoxCameras2.Items.Count > 1)
+            {
+                comboBoxCameras2.SelectedIndex = 1;
+            } else if (comboBoxCameras2.Items.Count > 0)
+            {
+                comboBoxCameras2.SelectedIndex = 0;
+            }
         }
 
         private void LoadMicrophones()
