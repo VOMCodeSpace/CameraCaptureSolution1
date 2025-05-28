@@ -13,6 +13,9 @@ namespace CameraCaptureUI
 {
     public partial class Form1 : Form
     {
+        PreviewSession session1;
+        PreviewSession session2;
+
         public Form1()
         {
             InitializeComponent();
@@ -70,12 +73,44 @@ namespace CameraCaptureUI
                 comboBoxMicrophones.SelectedIndex = 0;
         }
 
+        private void LoadCameraFormats(int deviceIndex)
+        {
+            comboBoxVideoFormats.Items.Clear(); // limpia antes de cargar
+
+            if (CameraInterop.GetSupportedFormats(deviceIndex, out IntPtr ptr, out int count))
+            {
+                int size = Marshal.SizeOf<CameraFormat>();
+                var uniqueFormats = new HashSet<string>();
+
+                for (int i = 0; i < count; i++)
+                {
+                    IntPtr itemPtr = IntPtr.Add(ptr, i * size);
+                    CameraFormat format = Marshal.PtrToStructure<CameraFormat>(itemPtr);
+
+                    // clave única para evitar duplicados
+                    string key = $"{format.Width}x{format.Height}@{format.FpsNumerator}/{format.FpsDenominator}";
+
+                    if (uniqueFormats.Add(key))
+                    {
+                        string description = $"{format.Width}x{format.Height} @ {(format.FpsNumerator / (double)format.FpsDenominator):F2} fps";
+                        comboBoxVideoFormats.Items.Add(description);
+                    }
+                }
+
+                CameraInterop.FreeFormats(ptr); // liberar memoria desde C++
+            }
+        }
+
+
         private void btnPreview_Click(object sender, EventArgs e)
         {
-            if (comboBoxCameras.SelectedItem is CameraItem selected)
+            if (comboBoxCameras.SelectedItem is CameraItem selected1 && comboBoxCameras2.SelectedItem is CameraItem selected2)
             {
-                IntPtr hwnd = pictureBoxPreview.Handle;
-                CameraInterop.StartPreview(selected.Index, hwnd);
+                IntPtr hwnd1 = pictureBoxPreview.Handle;
+                IntPtr hwnd2 = pictureBoxPreview2.Handle;
+
+                CameraInterop.StartPreview(selected1.Index, hwnd1, ref session1);
+                CameraInterop.StartPreview(selected2.Index, hwnd2, ref session2);
             }
         }
 
@@ -105,7 +140,10 @@ namespace CameraCaptureUI
 
         private void button3_Click(object sender, EventArgs e)
         {
-            CameraInterop.ResumeRecording();
+            if (comboBoxCameras.SelectedItem is CameraItem selected)
+            {
+                LoadCameraFormats(selected.Index);
+            }
         }
 
         private void button4_Click(object sender, EventArgs e)
@@ -128,11 +166,11 @@ public static class CameraInterop
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern void GetCameraName(int index, [Out] char[] nameBuffer, int bufferLength);
 
-    [DllImport("CameraCaptureLib.dll")]
-    public static extern bool StartPreview(int index, IntPtr hwnd);
+    [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern bool StartPreview(int index, IntPtr hwnd, ref PreviewSession session);
 
-    [DllImport("CameraCaptureLib.dll")]
-    public static extern void StopPreview();
+    [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void StopPreview(ref PreviewSession session);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern int GetMicrophoneCount();
@@ -151,6 +189,28 @@ public static class CameraInterop
 
     [DllImport("CameraCaptureLib.dll")]
     public static extern bool StopRecording();
+
+    [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern bool GetSupportedFormats(int deviceIndex, out IntPtr formats, out int count);
+
+    [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void FreeFormats(IntPtr formats);
+}
+
+public struct PreviewSession
+{
+    public IntPtr pSession;
+    public IntPtr pSource;
+    public IntPtr pTopology;
+    public IntPtr hwndPreview;
+}
+
+public struct CameraFormat
+{
+    public uint Width;
+    public uint Height;
+    public uint FpsNumerator;
+    public uint FpsDenominator;
 }
 
 public class CameraItem
