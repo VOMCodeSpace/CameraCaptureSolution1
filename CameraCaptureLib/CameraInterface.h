@@ -6,6 +6,7 @@
 #include <mfobjects.h>
 #include <mfidl.h>
 #include <mfapi.h> 
+#include <guiddef.h> // Necesario para GUID
 
 struct PreviewSession {
     IMFMediaSession* pSession = nullptr;
@@ -13,11 +14,13 @@ struct PreviewSession {
     IMFTopology* pTopology = nullptr;
     HWND hwndPreview = nullptr;
 };
+#define MAX_SUBTYPE_NAME_LEN 32
 struct CameraFormat {
     UINT32 width;
     UINT32 height;
-    UINT32 fpsNumerator;
-    UINT32 fpsDenominator;
+    UINT32 fps_num;
+    UINT32 fps_den;
+    char subtype[MAX_SUBTYPE_NAME_LEN]; // ¡CAMBIO CLAVE: array de char de tamaño fijo!
 };
 
 #ifdef __cplusplus
@@ -42,13 +45,20 @@ extern "C" {
 
     // Control de grabación
     __declspec(dllexport) bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath);
+    __declspec(dllexport) bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const wchar_t* outputPath);
     __declspec(dllexport) bool PauseRecording();
-    __declspec(dllexport) bool ResumeRecording();
+    __declspec(dllexport) bool ContinueRecording();
     __declspec(dllexport) bool StopRecording();
 
     // Obtener formatos de camara
     __declspec(dllexport) bool GetSupportedFormats(int deviceIndex, CameraFormat** formats, int* count);
     __declspec(dllexport) void FreeFormats(CameraFormat* formats);
+
+    typedef void(__stdcall* ErrorCallbackFunc)(const wchar_t* message);
+    __declspec(dllexport) void __stdcall SetErrorCallback(ErrorCallbackFunc callback);
+
+    // Ejemplo de función exportada
+    __declspec(dllexport) int __stdcall GetCameraCount();
 
 #ifdef __cplusplus
 }
