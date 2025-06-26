@@ -23,6 +23,11 @@
 #include <condition_variable>
 #include <mfplay.h>
 #include <algorithm>
+#include <gdiplus.h>
+#include <wincodec.h>
+#include <atlbase.h>
+#include <wrl/client.h>
+#include <fstream>
 
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mf.lib")
@@ -31,31 +36,62 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")
 
+using namespace Gdiplus;
+using Microsoft::WRL::ComPtr;
+
+
 std::thread videoThread;
 std::thread audioThread;
 
 // --- Variables globales ---
-static IMFMediaSource* g_pSource = nullptr;
-static IMFMediaSession* g_pSession = nullptr;
 static IMFActivate** g_ppDevices = nullptr;
 static UINT32 g_deviceCount = 0;
-static IMFTopology* g_pTopology = nullptr;
-static HWND g_hwndPreview = nullptr;
 static std::vector<IMFActivate*> g_audioDevices;
 static ErrorCallbackFunc g_errorCallback = nullptr;
 static LONGLONG MIN_TIME_BEFORE_PAUSE_ALLOWED = 30000000;
 
 std::string GUIDToSubtypeString(const GUID& subtype) {
-    if (subtype == MFVideoFormat_RGB24) return "RGB24";
-    if (subtype == MFVideoFormat_RGB32) return "RGB32";
-    if (subtype == MFVideoFormat_ARGB32) return "ARGB32";
-    if (subtype == MFVideoFormat_YUY2) return "YUY2";
-    if (subtype == MFVideoFormat_NV12) return "NV12";
-    if (subtype == MFVideoFormat_MPEG2) return "MJPEG";
-    if (subtype == MFVideoFormat_H264) return "H264";
-    if (subtype == MFVideoFormat_UYVY) return "UYVY";
-    if (subtype == MFVideoFormat_YV12) return "YV12";
-    // Agrega más formatos si los necesitas
+    if (subtype == MFVideoFormat_RGB24)        return "RGB24";
+    if (subtype == MFVideoFormat_RGB32)        return "RGB32";
+    if (subtype == MFVideoFormat_ARGB32)       return "ARGB32";
+    if (subtype == MFVideoFormat_YUY2)         return "YUY2";
+    if (subtype == MFVideoFormat_UYVY)         return "UYVY";
+    if (subtype == MFVideoFormat_NV12)         return "NV12";
+    if (subtype == MFVideoFormat_YV12)         return "YV12";
+    if (subtype == MFVideoFormat_MJPG)         return "MJPEG";
+    if (subtype == MFVideoFormat_H264)         return "H264";
+    if (subtype == MFVideoFormat_HEVC)         return "HEVC";
+    if (subtype == MFVideoFormat_H265)         return "H265";
+    if (subtype == MFVideoFormat_H264_ES)      return "H264-ES";
+    if (subtype == MFVideoFormat_HEVC_ES)      return "HEVC-ES";
+    if (subtype == MFVideoFormat_MP4S)         return "MP4S";
+    if (subtype == MFVideoFormat_MP43)         return "MP43";
+    if (subtype == MFVideoFormat_MP4S)         return "MP4S";
+    if (subtype == MFVideoFormat_MPG1)         return "MPEG1";
+    if (subtype == MFVideoFormat_MPEG2)        return "MPEG2";
+    if (subtype == MFVideoFormat_VP80)         return "VP8";
+    if (subtype == MFVideoFormat_VP90)         return "VP9";
+    if (subtype == MFVideoFormat_WMV1)         return "WMV1";
+    if (subtype == MFVideoFormat_WMV2)         return "WMV2";
+    if (subtype == MFVideoFormat_WMV3)         return "WMV3";
+    if (subtype == MFVideoFormat_WVC1)         return "WVC1";
+    if (subtype == MFVideoFormat_DV25)         return "DV25";
+    if (subtype == MFVideoFormat_DV50)         return "DV50";
+    if (subtype == MFVideoFormat_DVC)          return "DVC";
+    if (subtype == MFVideoFormat_DVH1)         return "DVH1";
+    if (subtype == MFVideoFormat_DVHD)         return "DVHD";
+    if (subtype == MFVideoFormat_DVSD)         return "DVSD";
+    if (subtype == MFVideoFormat_DVSL)         return "DVSL";
+    if (subtype == MFVideoFormat_H263)         return "H263";
+    if (subtype == MFVideoFormat_L8)           return "L8";
+    if (subtype == MFVideoFormat_L16)          return "L16";
+    if (subtype == MFVideoFormat_D16)          return "D16";
+    if (subtype == MFVideoFormat_420O)         return "420O";
+    if (subtype == MFVideoFormat_AI44)         return "AI44";
+    if (subtype == MFVideoFormat_MSS1)         return "MSS1";
+    if (subtype == MFVideoFormat_MSS2)         return "MSS2";
+    if (subtype == MFVideoFormat_MPG1)         return "MPEG1";
+
     return "UNKNOWN";
 }
 
@@ -81,6 +117,11 @@ struct MediaCaptureContext {
 };
 static MediaCaptureContext g_ctx;
 
+extern "C" __declspec(dllexport) void __stdcall SetErrorCallback(ErrorCallbackFunc callback) {
+    g_errorCallback = callback;
+}
+
+
 // --- Prototipos internos ---
 bool InitializeRecorder(int videoIndex, int audioIndex, const wchar_t* outputPath);
 
@@ -100,20 +141,180 @@ void ResetContext() {
     g_ctx.baseTime = -1;
 }
 
-extern "C" __declspec(dllexport) void __stdcall SetErrorCallback(ErrorCallbackFunc callback) {
-    g_errorCallback = callback;
-}
+#ifndef SAFE_RELEASE
+#define SAFE_RELEASE(punk) \
+   if ((punk) != NULL)  \
+      { (punk)->Release(); (punk) = NULL; }
+#endif
 
+#ifndef CHECK_HR
+#define CHECK_HR(hr_val, msg) \
+    if (FAILED(hr_val)) { \
+        std::cerr << "Error in " << msg << ": 0x" << std::hex << hr_val << std::endl; \
+        goto error; \
+    }
+#endif
 
 void ReportError(const std::wstring& message) {
     if (g_errorCallback) {
-        try {
-            g_errorCallback(message.c_str());
-        }
+        try { g_errorCallback(message.c_str()); }
         catch (...) {
             // Silenciar excepciones del lado .NET si el callback falla
         }
     }
+}
+
+
+HRESULT GetCameraDeviceActivate(const std::wstring& targetName, IMFActivate** ppActivateOut) {
+    if (!ppActivateOut) return E_POINTER;
+    *ppActivateOut = nullptr;
+
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (FAILED(hr)) return hr;
+
+    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
+    if (FAILED(hr)) goto cleanup;
+
+    for (UINT32 i = 0; i < count; ++i) {
+        WCHAR* name = nullptr;
+        UINT32 cchName = 0;
+        hr = ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName);
+        if (SUCCEEDED(hr)) {
+            if (targetName == name) {
+                *ppActivateOut = ppDevices[i];
+                (*ppActivateOut)->AddRef();
+                CoTaskMemFree(name);
+                hr = S_OK;
+                goto cleanup;
+            }
+            CoTaskMemFree(name);
+        }
+    }
+
+    hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+
+cleanup:
+    for (UINT32 i = 0; i < count; ++i) {
+        if (ppDevices[i]) ppDevices[i]->Release();
+    }
+    CoTaskMemFree(ppDevices);
+    if (pAttributes) pAttributes->Release();
+
+    return hr;
+}
+
+HRESULT GetAudioDeviceActivate(const std::wstring& targetName, IMFActivate** ppActivateOut) {
+    if (!ppActivateOut) return E_POINTER;
+    *ppActivateOut = nullptr;
+
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (FAILED(hr)) return hr;
+
+    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
+    if (FAILED(hr)) goto cleanup;
+
+    for (UINT32 i = 0; i < count; ++i) {
+        WCHAR* name = nullptr;
+        UINT32 cchName = 0;
+        hr = ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName);
+        if (SUCCEEDED(hr)) {
+            if (targetName == name) {
+                *ppActivateOut = ppDevices[i];
+                (*ppActivateOut)->AddRef();
+                CoTaskMemFree(name);
+                hr = S_OK;
+                goto cleanup;
+            }
+            CoTaskMemFree(name);
+        }
+    }
+
+    hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+
+cleanup:
+    for (UINT32 i = 0; i < count; ++i) {
+        if (ppDevices[i]) ppDevices[i]->Release();
+    }
+    CoTaskMemFree(ppDevices);
+    if (pAttributes) pAttributes->Release();
+
+    return hr;
+}
+
+// --- Vista previa ---
+HRESULT CreateMediaSourceFromDevice(const std::wstring& friendlyName, IMFMediaSource** ppSource) {
+    if (!ppSource) return E_POINTER;
+    *ppSource = nullptr;
+
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
+    if (FAILED(hr)) return hr;
+
+    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
+    if (FAILED(hr)) goto cleanup;
+
+    for (UINT32 i = 0; i < count; ++i) {
+        WCHAR* name = nullptr;
+        UINT32 cchName = 0;
+        hr = ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName);
+        if (SUCCEEDED(hr)) {
+            if (friendlyName == name) {
+                hr = ppDevices[i]->ActivateObject(IID_PPV_ARGS(ppSource));
+                CoTaskMemFree(name);
+                goto cleanup;
+            }
+            CoTaskMemFree(name);
+        }
+    }
+
+    hr = MF_E_NOT_FOUND;
+
+cleanup:
+    if (ppDevices) {
+        for (UINT32 i = 0; i < count; ++i)
+            if (ppDevices[i]) ppDevices[i]->Release();
+        CoTaskMemFree(ppDevices);
+    }
+    if (pAttributes) pAttributes->Release();
+
+    return hr;
+}
+
+// Variables globales
+static HWND g_hwnd = nullptr;
+static std::atomic<bool> g_previewRunning(false); // Usar atomic para acceso seguro entre hilos
+static std::thread g_previewThread;
+HBITMAP g_hBitmap = nullptr;
+HGDIOBJ g_oldBitmap = nullptr;
+HDC g_memDC = nullptr;
+BITMAPINFO g_bmi = {};
+void* g_pBits = nullptr;
+static std::vector<std::string> g_cameraNames;
+
+void FreeCameraList(wchar_t** names, int count) {
+    for (int i = 0; i < count; ++i) {
+        delete[] names[i];
+    }
+    delete[] names;
 }
 
 bool StopRecorder() {
@@ -130,7 +331,7 @@ bool StopRecorder() {
 
     if (g_ctx.sinkWriter) {
         hr = g_ctx.sinkWriter->Finalize();
-        if (FAILED(hr)) std::cout << "[ERROR] SinkWriter->Finalize falló: 0x" << std::hex << hr << "\n";
+        if (FAILED(hr)) ReportError(L"falló creando el escritor de medios.");
         g_ctx.sinkWriter->Release();
         g_ctx.sinkWriter = nullptr;
     }
@@ -169,22 +370,14 @@ bool StopRecorder() {
     }
 
     ResetContext();
-
-    std::cout << "[INFO] Grabación detenida correctamente.\n";
     return true;
 }
 
 // --- Inicialización y limpieza ---
 void InitializeCameraSystem()
 {
-    if (g_ctx.videoReader != nullptr)
-        return; // ya está inicializado
-
-    // Inicializa Media Foundation
+    if (g_ctx.videoReader != nullptr) return; // ya está inicializado
     MFStartup(MF_VERSION);
-
-    // Crear y configurar IMFSourceReader, asignarlo a g_ctx.videoReader
-    // Aquí deberías seleccionar una cámara y crear el lector con ella
 }
 
 void ShutdownCameraSystem() {
@@ -194,13 +387,10 @@ void ShutdownCameraSystem() {
     g_audioDevices.clear();
 
     if (g_ppDevices) {
-        for (UINT32 i = 0; i < g_deviceCount; i++) {
-            g_ppDevices[i]->Release();
-        }
+        for (UINT32 i = 0; i < g_deviceCount; i++) g_ppDevices[i]->Release();
         CoTaskMemFree(g_ppDevices);
         g_ppDevices = nullptr;
     }
-
     MFShutdown();
 }
 
@@ -220,8 +410,7 @@ int GetCameraCount() {
 }
 
 void GetCameraName(int index, wchar_t* nameBuffer, int bufferLength) {
-    if (!g_ppDevices || index < 0 || index >= (int)g_deviceCount)
-        return;
+    if (!g_ppDevices || index < 0 || index >= (int)g_deviceCount) return;
 
     WCHAR* szFriendlyName = nullptr;
     UINT32 cchName;
@@ -242,14 +431,11 @@ int GetMicrophoneCount() {
     MFCreateAttributes(&pAttributes, 1);
     pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID);
     if (SUCCEEDED(MFEnumDeviceSources(pAttributes, &ppDevices, &count))) {
-        for (UINT32 i = 0; i < count; i++) {
-            g_audioDevices.push_back(ppDevices[i]);
-        }
+        for (UINT32 i = 0; i < count; i++) g_audioDevices.push_back(ppDevices[i]);
     }
 
     if (pAttributes) pAttributes->Release();
     CoTaskMemFree(ppDevices);
-
     return static_cast<int>(g_audioDevices.size());
 }
 
@@ -268,15 +454,14 @@ void GetMicrophoneName(int index, wchar_t* nameBuffer, int nameBufferSize) {
     }
 }
 
-// --- Vista previa ---
-HRESULT CreateMediaSourceFromDevice(int index, IMFMediaSource** ppSource) {
-    if (!g_ppDevices || index >= (int)g_deviceCount) return E_FAIL;
-    return g_ppDevices[index]->ActivateObject(IID_PPV_ARGS(ppSource));
-}
-
-bool StartPreview(int index, HWND hwnd, PreviewSession* session)
+bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd, PreviewSession** outSession)
 {
-    StopPreview(session); // ← también necesitarás una versión específica por sesión
+    if (!outSession) return false;
+
+    PreviewSession* session = new PreviewSession();
+    ZeroMemory(session, sizeof(PreviewSession));
+    session->hwndPreview = hwnd;
+    StopPreview(&session);
 
     IMFPresentationDescriptor* pPD = nullptr;
     IMFStreamDescriptor* pSD = nullptr;
@@ -286,7 +471,7 @@ bool StartPreview(int index, HWND hwnd, PreviewSession* session)
 
     HRESULT hr;
 
-    if (FAILED(hr = CreateMediaSourceFromDevice(index, &session->pSource))) return false;
+    if (FAILED(hr = CreateMediaSourceFromDevice(cameraFriendlyName, &session->pSource))) return false;
     if (FAILED(hr = MFCreateMediaSession(nullptr, &session->pSession))) return false;
     if (FAILED(hr = session->pSource->CreatePresentationDescriptor(&pPD))) return false;
 
@@ -320,34 +505,32 @@ bool StartPreview(int index, HWND hwnd, PreviewSession* session)
     pSourceNode->Release();
     pOutputNode->Release();
 
+    *outSession = session;
+
     return SUCCEEDED(hr);
 }
 
-
-void StopPreview(PreviewSession* session)
+void StopPreview(PreviewSession** session)
 {
-    if (!session) return;
+    if (!session || !*session) return;
+    PreviewSession* s = *session;
 
-    if (session->pSession) {
+    if (s->pSession) {
         HRESULT hr;
 
         // Detener sesión
-        hr = session->pSession->Stop();
-        if (FAILED(hr)) {
-            OutputDebugString(L"[ERROR] Stop falló\n");
-        }
+        hr = s->pSession->Stop();
+        if (FAILED(hr)) ReportError(L"[ERROR] Función Detener falló\n");
 
         // Cerrar sesión
-        hr = session->pSession->Close();
-        if (FAILED(hr)) {
-            OutputDebugString(L"[ERROR] Close falló\n");
-        }
+        hr = s->pSession->Close();
+        if (FAILED(hr)) ReportError(L"[ERROR] Función Cerrar falló\n");
 
         // Esperar a que se cierre
         IMFMediaEvent* pEvent = nullptr;
         MediaEventType meType = MEUnknown;
 
-        while (SUCCEEDED(session->pSession->GetEvent(0, &pEvent))) {
+        while (SUCCEEDED(s->pSession->GetEvent(0, &pEvent))) {
             if (SUCCEEDED(pEvent->GetType(&meType))) {
                 if (meType == MESessionClosed) {
                     pEvent->Release();
@@ -357,31 +540,26 @@ void StopPreview(PreviewSession* session)
             pEvent->Release();
         }
 
-        session->pSession->Shutdown();
-        session->pSession->Release();
-        session->pSession = nullptr;
+        s->pSession->Shutdown();
+        s->pSession->Release();
+        s->pSession = nullptr;
     }
 
-    if (session->hwndPreview) {
-        InvalidateRect(session->hwndPreview, NULL, TRUE);
-        UpdateWindow(session->hwndPreview);
-        session->hwndPreview = nullptr;
+    if (s->hwndPreview) {
+        InvalidateRect(s->hwndPreview, NULL, TRUE);
+        UpdateWindow(s->hwndPreview);
+        s->hwndPreview = nullptr;
     }
 
-    if (session->pSource) {
-        session->pSource->Release();
-        session->pSource = nullptr;
+    if (s->pSource) {
+        s->pSource->Release();
+        s->pSource = nullptr;
     }
 
-    if (session->pTopology) {
-        session->pTopology->Release();
-        session->pTopology = nullptr;
+    if (s->pTopology) {
+        s->pTopology->Release();
+        s->pTopology = nullptr;
     }
-
-    std::cout << g_pSession << std::endl;
-    std::cout << g_hwndPreview << std::endl;
-    std::cout << g_pSource << std::endl;
-    std::cout << g_pTopology << std::endl;
 }
 
 bool PauseRecorder() {
@@ -389,21 +567,13 @@ bool PauseRecorder() {
         if (!g_ctx.isPaused)
         {
             LONGLONG currentTime = MFGetSystemTime();
-            if ((currentTime - g_ctx.recordingStartTime) < MIN_TIME_BEFORE_PAUSE_ALLOWED) {
-                return false;
-            }
+            if ((currentTime - g_ctx.recordingStartTime) < MIN_TIME_BEFORE_PAUSE_ALLOWED) return false;
             g_ctx.pauseStartTime = MFGetSystemTime();
             g_ctx.isPaused = true;
         }
-        else
-        {
-            return false;
-        }
+        else return false;
     }
-    else
-    {
-        return false;
-    }
+    else return false;
     return true;
 }
 
@@ -418,92 +588,15 @@ bool ContinueRecorder() {
             g_ctx.totalPausedDuration += (now - g_ctx.pauseStartTime);
             g_ctx.isPaused = false;
         }
-        else
-        {
-            return false;
-        }
+        else return false;
     }
-    else {
-        return false;
-    }
+    else return false;
     return true;
 }
 
 bool PauseRecording() { return g_ctx.isRecording ? PauseRecorder() : false; }
 bool ContinueRecording() { return g_ctx.isRecording ? ContinueRecorder() : false; }
 bool StopRecording() { return g_ctx.isRecording ? StopRecorder() : false; }
-
-HRESULT GetCameraDeviceActivate(UINT32 camIndex, IMFActivate** ppActivate) {
-    IMFAttributes* pAttributes = nullptr;
-    IMFActivate** ppDevices = nullptr;
-    UINT32 count = 0;
-    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
-    if (FAILED(hr)) return hr;
-
-    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    if (FAILED(hr)) goto done;
-
-    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
-    if (FAILED(hr)) goto done;
-
-    if (camIndex >= count) {
-        hr = E_INVALIDARG;
-        goto done;
-    }
-
-    *ppActivate = ppDevices[camIndex];
-    (*ppActivate)->AddRef();
-
-done:
-    for (UINT32 i = 0; i < count; ++i)
-        if (ppDevices[i]) ppDevices[i]->Release();
-    CoTaskMemFree(ppDevices);
-    if (pAttributes) pAttributes->Release();
-    return hr;
-}
-
-HRESULT GetAudioDeviceActivate(UINT32 micIndex, IMFActivate** ppActivate) {
-    IMFAttributes* pAttributes = nullptr;
-    IMFActivate** ppDevices = nullptr;
-    UINT32 count = 0;
-    HRESULT hr = MFCreateAttributes(&pAttributes, 1);
-    if (FAILED(hr)) return hr;
-
-    hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_GUID);
-    if (FAILED(hr)) goto done;
-
-    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &count);
-    if (FAILED(hr)) goto done;
-
-    if (micIndex >= count) {
-        hr = E_INVALIDARG;
-        goto done;
-    }
-
-    *ppActivate = ppDevices[micIndex];
-    (*ppActivate)->AddRef();
-
-done:
-    for (UINT32 i = 0; i < count; ++i)
-        if (ppDevices[i]) ppDevices[i]->Release();
-    CoTaskMemFree(ppDevices);
-    if (pAttributes) pAttributes->Release();
-    return hr;
-}
-
-#ifndef SAFE_RELEASE
-#define SAFE_RELEASE(punk) \
-   if ((punk) != NULL)  \
-      { (punk)->Release(); (punk) = NULL; }
-#endif
-
-#ifndef CHECK_HR
-#define CHECK_HR(hr_val, msg) \
-    if (FAILED(hr_val)) { \
-        std::cerr << "Error in " << msg << ": 0x" << std::hex << hr_val << std::endl; \
-        goto error; \
-    }
-#endif
 
 HRESULT SetPreferredMediaType(
     IMFSourceReader* pReader,
@@ -531,10 +624,7 @@ HRESULT SetPreferredMediaType(
     for (DWORD i = 0; ; ++i) {
         hr = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &pMediaType);
         if (FAILED(hr)) {
-            if (hr == MF_E_NO_MORE_TYPES) {
-                // std::cout << "No more native media types found.\n"; // Optional
-                hr = S_OK;
-            }
+            if (hr == MF_E_NO_MORE_TYPES) hr = S_OK;
             break;
         }
 
@@ -544,11 +634,6 @@ HRESULT SetPreferredMediaType(
         if (SUCCEEDED(pMediaType->GetGUID(MF_MT_SUBTYPE, &subtypeGuid)) &&
             SUCCEEDED(MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width_native, &height_native)) &&
             SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &num_native, &den_native))) {
-
-            // --- Add this line for debugging! ---
-            std::cout << "DEBUG: Native format found: " << width_native << "x" << height_native << " @ "
-                << num_native << "/" << den_native << " (" << GUIDToSubtypeString(subtypeGuid) << ")\n";
-            // --- End debug line ---
 
             // ... rest of your SetPreferredMediaType logic for finding preferred types ...
             // If it's the ideal NV12
@@ -589,8 +674,6 @@ HRESULT SetPreferredMediaType(
                     pFoundType = pMediaType;
                     pFoundType->AddRef();
                     pMediaType->Release();
-                    std::cout << "Found preferred format: " << GUIDToSubtypeString(currentPreferredSubtype) << " "
-                        << targetWidth << "x" << targetHeight << " @ " << targetFpsNum << "/" << targetFpsDen << "\n";
                     hr = S_OK;
                     goto found_type;
                 }
@@ -604,10 +687,7 @@ HRESULT SetPreferredMediaType(
     // directamente al formato deseado (NV12) y dejar que Media Foundation intente la transcodificación.
     // Esto es lo que estabas haciendo antes, pero ahora es un último recurso.
     hr = MFCreateMediaType(&pFoundType);
-    if (FAILED(hr)) {
-        std::cerr << "Error al crear pFoundType para el último intento: 0x" << std::hex << hr << "\n";
-        goto cleanup;
-    }
+    if (FAILED(hr)) goto cleanup;
 
     hr = pFoundType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     if (FAILED(hr)) goto cleanup;
@@ -618,23 +698,15 @@ HRESULT SetPreferredMediaType(
     hr = MFSetAttributeRatio(pFoundType, MF_MT_FRAME_RATE, targetFpsNum, targetFpsDen);
     if (FAILED(hr)) goto cleanup;
 
-    std::cout << "Attempting to set requested NV12 format directly as a fallback.\n";
-
 found_type:
     // Una vez que tengamos pFoundType (ya sea nativo o recién creado), intentamos aplicarlo
     if (pFoundType) {
         hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pFoundType);
-        if (FAILED(hr)) {
-            std::cerr << "FAILED to set media type to " << targetWidth << "x" << targetHeight
-                << " @ " << targetFpsNum << "/" << targetFpsDen << " (NV12 or preferred): 0x" << std::hex << hr << "\n";
-        }
-        else {
-            std::cout << "Successfully set video media type for reader.\n";
-        }
+        if (FAILED(hr)) ReportError(L"Falló confgurando el formato");
     }
     else {
         hr = E_UNEXPECTED; // No se encontró ningún tipo de medio para intentar
-        std::cerr << "Error: No suitable media type found or created for reader.\n";
+        ReportError(L"No se encontró ningún tipo de medio para intentar");
     }
 
 cleanup:
@@ -642,7 +714,7 @@ cleanup:
     return hr;
 }
 
-bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
+bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const wchar_t* outputPath, int indexFormat, int bitrate) {
     if (g_ctx.isRecording) {
         ReportError(L"Error: La grabación ya está en curso.");
         return false;
@@ -652,7 +724,7 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
     HRESULT hr = S_OK;
 
     UINT32 num = 0, den = 0;
-    UINT32 width = 320, height = 180;
+    UINT32 width = 0, height = 0;
     IMFAttributes* pAttributes = nullptr;
 
     IMFMediaType* nativeVideoType = nullptr;
@@ -665,13 +737,13 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
 
     if (g_ctx.isRecording.load()) return false;
 
-    hr = GetCameraDeviceActivate(camIndex, &pVideoActivate);
+    hr = GetCameraDeviceActivate(cameraFriendlyName, &pVideoActivate);
     if (FAILED(hr)) goto error;
     hr = pVideoActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource));
     pVideoActivate->Release();
     if (FAILED(hr)) goto error;
 
-    hr = GetAudioDeviceActivate(micIndex, &pAudioActivate);
+    hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate);
     if (FAILED(hr)) goto error;
     hr = pAudioActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource));
     pAudioActivate->Release();
@@ -683,7 +755,7 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
     if (FAILED(hr)) goto error;
 
     // 3. Obtener tipo nativo video
-    hr = g_ctx.videoReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &nativeVideoType);
+    hr = g_ctx.videoReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, indexFormat, &nativeVideoType);
     if (FAILED(hr)) goto error;
     hr = g_ctx.videoReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeVideoType);
     if (FAILED(hr)) goto error;
@@ -700,25 +772,40 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
     hr = pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE); // Opcional, para usar HW
     hr = pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE); // Opcional, si es necesario
 
-    // 5. Crear SinkWriter
-    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, pAttributes, &g_ctx.sinkWriter); if (FAILED(hr)) goto error;
+    // 5. Crear SinkWriter con archivo temporal
+    wchar_t tempPath[MAX_PATH];
+    wchar_t outputPathCopy[MAX_PATH];
+    wcsncpy_s(outputPathCopy, outputPath, MAX_PATH);
+
+    // Elimina extensión original y añade .tmp.mp4
+    PathRemoveExtensionW(outputPathCopy);
+    swprintf_s(tempPath, L"%s.tmp.mp4", outputPathCopy);
+
+    hr = MFCreateSinkWriterFromURL(tempPath, nullptr, pAttributes, &g_ctx.sinkWriter);
+    if (FAILED(hr)) goto error;
 
     // 6. Configurar tipo salida video (H264)
     hr = MFCreateMediaType(&outVideoType); if (FAILED(hr)) goto error;
     hr = outVideoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); if (FAILED(hr)) goto error;
     hr = outVideoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264); if (FAILED(hr)) goto error;
-    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, 128000); if (FAILED(hr)) goto error;
+    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, bitrate); if (FAILED(hr)) goto error;
     hr = outVideoType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive); if (FAILED(hr)) goto error;
-    hr = MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, 24, 1); if (FAILED(hr)) goto error;
-    hr = MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1); if (FAILED(hr)) goto error;
-    hr = MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, 640, 360); if (FAILED(hr)) goto error;
-    MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, width, height);
-    MFGetAttributeRatio(nativeVideoType, MF_MT_FRAME_RATE, &num, &den);
-    if (num == 0 || den == 0) { num = 30; den = 1; }
-    MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, num, den);
-    MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 
+    // Extraer resolución y frame rate del tipo nativo seleccionado
+    hr = MFGetAttributeSize(nativeVideoType, MF_MT_FRAME_SIZE, &width, &height); if (FAILED(hr)) goto error;
+    hr = MFGetAttributeRatio(nativeVideoType, MF_MT_FRAME_RATE, &num, &den); if (FAILED(hr)) {
+        num = 30; den = 1; // Valor por defecto si falla
+    }
+
+    // Aplicar los mismos valores al tipo de salida
+    hr = MFSetAttributeSize(outVideoType, MF_MT_FRAME_SIZE, width, height); if (FAILED(hr)) goto error;
+    hr = MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, num, den); if (FAILED(hr)) goto error;
+    hr = MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1); if (FAILED(hr)) goto error;
+
+    // Crear stream de salida de video
     hr = g_ctx.sinkWriter->AddStream(outVideoType, &g_ctx.videoStreamIndex); if (FAILED(hr)) goto error;
+
+    // Asignar el tipo de entrada al sinkWriter tal como viene del dispositivo
     hr = g_ctx.sinkWriter->SetInputMediaType(g_ctx.videoStreamIndex, nativeVideoType, nullptr); if (FAILED(hr)) goto error;
 
     // 7. Configurar salida audio (AAC)
@@ -803,6 +890,7 @@ bool StartRecording(int camIndex, int micIndex, const wchar_t* outputPath) {
     if (outVideoType) outVideoType->Release();
     if (outAudioType) outAudioType->Release();
 
+    MoveFileExW(tempPath, outputPath, MOVEFILE_REPLACE_EXISTING);
     return true;
 
 error:
@@ -816,12 +904,13 @@ error:
     if (g_ctx.audioReader) { g_ctx.audioReader->Release(); g_ctx.audioReader = nullptr; }
     if (g_ctx.sinkWriter) { g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr; }
 
+    DeleteFileW(tempPath);
     ResetContext();
     ReportError(L"Error: La grabación no pudo ejecutarse.");
     return false;
 }
 
-bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const wchar_t* outputPath) {
+bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath) {
     if (g_ctx.isRecording) {
         ReportError(L"Error: La grabación ya está en curso.");
         return false;
@@ -840,7 +929,7 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
     // --- Parámetros de Video de Salida Compuesto ---
     // Ajusta estos valores a la resolución y FPS que quieres para el archivo final.
     UINT32 finalOutputWidth = 1280; // Ancho total del video compuesto (ej: 2 cámaras una al lado de la otra)
-    UINT32 finalOutputHeight = (cam2Index >= 0) ? (720 * 2) : 720; // Alto total del video compuesto
+    UINT32 finalOutputHeight = (cameraFriendlyName) ? (720 * 2) : 720; // Alto total del video compuesto
     UINT32 finalOutputFpsNum = 30; // Numerador de FPS del video compuesto
     UINT32 finalOutputFpsDen = 1;  // Denominador de FPS del video compuesto (ej: 30/1 = 30 FPS)
 
@@ -862,9 +951,9 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
     IMFMediaType* sinkInputVideoType = nullptr;
 
     // 1. Obtener los activadores de los dispositivos
-    if (camIndex >= 0)
+    if (cameraFriendlyName)
     {
-        hr = GetCameraDeviceActivate(camIndex, &pVideoActivate1); CHECK_HR(hr, "GetCameraDeviceActivate (Cam1)");
+        hr = GetCameraDeviceActivate(cameraFriendlyName, &pVideoActivate1); CHECK_HR(hr, "GetCameraDeviceActivate (Cam1)");
         hr = pVideoActivate1->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource)); CHECK_HR(hr, "ActivateObject (Cam1)");
     }
     else 
@@ -873,8 +962,8 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
         g_ctx.videoReader = nullptr; // Asegurarse de que sea nulo si no se usa
     }
 
-    if (cam2Index >= 0 and cam2Index != camIndex) {
-        hr = GetCameraDeviceActivate(cam2Index, &pVideoActivate2); CHECK_HR(hr, "GetCameraDeviceActivate (Cam2)");
+    if (cameraFriendlyName and cameraFriendlyName2 != cameraFriendlyName) {
+        hr = GetCameraDeviceActivate(cameraFriendlyName2, &pVideoActivate2); CHECK_HR(hr, "GetCameraDeviceActivate (Cam2)");
         hr = pVideoActivate2->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource2)); CHECK_HR(hr, "ActivateObject (Cam2)");
     }
     else
@@ -884,8 +973,8 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
     }
 
     // Obtener activador de audio (si micIndex es válido)
-    if (micIndex >= 0) { // Asumo que micIndex < 0 significa no grabar audio
-        hr = GetAudioDeviceActivate(micIndex, &pAudioActivate); CHECK_HR(hr, "GetAudioDeviceActivate");
+    if (micFriendlyName) { // Asumo que micIndex < 0 significa no grabar audio
+        hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate); CHECK_HR(hr, "GetAudioDeviceActivate");
         hr = pAudioActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource)); CHECK_HR(hr, "ActivateObject (Audio)");
     }
     else {
@@ -895,11 +984,11 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
 
 
     // 2. Crear SourceReaders desde los MediaSources
-    if (camIndex and g_ctx.videoSource)
+    if (cameraFriendlyName and g_ctx.videoSource)
     {
         hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource, nullptr, &g_ctx.videoReader); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Cam1)");
     }
-    if (cam2Index >= 0 and g_ctx.videoSource2) {
+    if (cameraFriendlyName2 and g_ctx.videoSource2) {
         hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource2, nullptr, &g_ctx.videoReader2); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Cam2)");
     }
     if (g_ctx.audioSource) { // Solo si hay fuente de audio
@@ -907,13 +996,13 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
     }
 
     // 3. Configurar tipos de entrada de video para ambas cámaras (usando SetPreferredMediaType)
-    if (camIndex >= 0)
+    if (cameraFriendlyName)
     {
         hr = SetPreferredMediaType(g_ctx.videoReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
         CHECK_HR(hr, "SetPreferredMediaType for primary camera");
     }
 
-    if (cam2Index >= 0) {
+    if (cameraFriendlyName2) {
         hr = SetPreferredMediaType(g_ctx.videoReader2, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
         CHECK_HR(hr, "SetPreferredMediaType for secondary camera");
     }
@@ -1017,7 +1106,7 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
     // 10. Hilo de video
     if (g_ctx.videoReader && g_ctx.videoReader2)
     {
-        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen,finalOutputWidth, finalOutputHeight, cam2Index,singleCamInputWidth, singleCamInputHeight]() 
+        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen,finalOutputWidth, finalOutputHeight, cameraFriendlyName2,singleCamInputWidth, singleCamInputHeight]()
         {
             HRESULT hr_thread = S_OK; // Usar una HR local para el hilo
             DWORD streamIndex, flags;
@@ -1179,9 +1268,7 @@ bool StartRecordingTwoCameras(int camIndex, int cam2Index, int micIndex, const w
                     }
 
                     // Solo inicializar baseTime una vez, idealmente por el primer stream que obtiene un tiempo
-                    if (g_ctx.baseTime == -1 && sampleTime > 0) {
-                        g_ctx.baseTime.store(sampleTime);
-                    }
+                    if (g_ctx.baseTime == -1 && sampleTime > 0) g_ctx.baseTime.store(sampleTime);
 
                     // Usar la sampleDuration correctamente obtenida
                     LONGLONG adjustedTime = (sampleTime - g_ctx.baseTime) - g_ctx.totalPausedDuration;
@@ -1233,152 +1320,252 @@ error:
     return false; // Indicar que StartRecording falló
 }
 
-bool GetSupportedFormats(int deviceIndex, CameraFormat** formats, int* count) {
+bool GetSupportedFormats(wchar_t* cameraFriendlyName, CameraFormat** formats, int* count) {
     *formats = nullptr;
     *count = 0;
 
-    HRESULT hr = S_OK; // Inicializa hr
-
-    // MFStartup y MFShutdown deben ser gestionados a nivel global de la aplicación
-    // Si no tienes un MFStartup y MFShutdown en tu main o en la inicialización/desinicialización global,
-    // puedes descomentar estas líneas, pero asegúrate de que no se llamen múltiples veces.
-    // hr = MFStartup(MF_VERSION);
-    // if (FAILED(hr)) {
-    //     std::cerr << "Error en MFStartup: 0x" << std::hex << hr << std::endl;
-    //     return false;
-    // }
+    HRESULT hr = MFStartup(MF_VERSION);
+    if (FAILED(hr)) return false;
 
     IMFAttributes* pAttributes = nullptr;
     IMFActivate** ppDevices = nullptr;
     UINT32 numDevices = 0;
     std::vector<CameraFormat> result;
+
     IMFMediaSource* pSource = nullptr;
-    IMFSourceReader* pReader = nullptr;
-    DWORD i = 0;
+    IMFPresentationDescriptor* pPD = nullptr;
+    IMFStreamDescriptor* pSD = nullptr;
+    IMFMediaTypeHandler* pHandler = nullptr;
 
+    DWORD typeCount = 0;
+    BOOL selected = FALSE;
     hr = MFCreateAttributes(&pAttributes, 1);
-    if (SUCCEEDED(hr)) {
-        hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    }
-    if (FAILED(hr)) {
-        std::cerr << "Error al crear atributos para enumerar dispositivos: 0x" << std::hex << hr << std::endl;
-        goto cleanup;
+    if (SUCCEEDED(hr)) hr = pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (SUCCEEDED(hr)) hr = MFEnumDeviceSources(pAttributes, &ppDevices, &numDevices);
+    if (FAILED(hr)) goto cleanup;
+
+    for (UINT32 i = 0; i < numDevices; ++i) {
+        WCHAR* name = nullptr;
+        UINT32 cchName = 0;
+        hr = ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName);
+        if (SUCCEEDED(hr)) {
+            if (wcscmp(cameraFriendlyName, name) == 0) {
+                hr = ppDevices[i]->ActivateObject(IID_PPV_ARGS(&pSource));
+                CoTaskMemFree(name);
+                break;
+            }
+            CoTaskMemFree(name);
+        }
     }
 
-    hr = MFEnumDeviceSources(pAttributes, &ppDevices, &numDevices);
-    if (FAILED(hr)) {
-        std::cerr << "Error al enumerar dispositivos de video: 0x" << std::hex << hr << std::endl;
-        goto cleanup;
-    }
+    hr = pSource->CreatePresentationDescriptor(&pPD);
+    if (FAILED(hr)) goto cleanup;
 
-    if (deviceIndex < 0 || deviceIndex >= (int)numDevices) {
-        std::cerr << "Error: Índice de dispositivo fuera de rango. deviceIndex = " << deviceIndex << ", numDevices = " << numDevices << std::endl;
-        hr = E_INVALIDARG; // Establece un HRESULT apropiado
-        goto cleanup;
-    }
+    hr = pPD->GetStreamDescriptorByIndex(0, &selected, &pSD);
+    if (FAILED(hr)) goto cleanup;
 
-    hr = ppDevices[deviceIndex]->ActivateObject(IID_PPV_ARGS(&pSource));
-    if (FAILED(hr)) {
-        std::cerr << "Error al activar el dispositivo de video " << deviceIndex << ": 0x" << std::hex << hr << std::endl;
-        goto cleanup;
-    }
+    hr = pSD->GetMediaTypeHandler(&pHandler);
+    if (FAILED(hr)) goto cleanup;
 
-    // El segundo parámetro (pAttributes) puede ser nullptr para el SourceReader si no se requieren atributos especiales.
-    hr = MFCreateSourceReaderFromMediaSource(pSource, nullptr, &pReader);
-    if (FAILED(hr)) {
-        std::cerr << "Error al crear SourceReader para el dispositivo " << deviceIndex << ": 0x" << std::hex << hr << std::endl;
-        goto cleanup;
-    }
+    hr = pHandler->GetMediaTypeCount(&typeCount);
+    if (FAILED(hr)) goto cleanup;
 
-    while (true) {
+    for (DWORD i = 0; i < typeCount; ++i) {
         IMFMediaType* pType = nullptr;
-        GUID subtypeGuid = GUID_NULL;
+        GUID subtype = GUID_NULL;
         UINT32 width = 0, height = 0, num = 0, den = 0;
 
-        // Intentar obtener el tipo de medio nativo
-        hr = pReader->GetNativeMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &pType);
-        if (FAILED(hr)) {
-            if (hr == MF_E_NO_MORE_TYPES) {
-                hr = S_OK; // No hay más tipos, salir con éxito del bucle
-            }
-            else {
-                std::cerr << "Error al obtener NativeMediaType " << i << " para el dispositivo " << deviceIndex << ": 0x" << std::hex << hr << std::endl;
-            }
-            break; // Salir del bucle
+        hr = pHandler->GetMediaTypeByIndex(i, &pType);
+        if (FAILED(hr)) continue;
+
+        CameraFormat fmt = {};
+
+        if (SUCCEEDED(pType->GetGUID(MF_MT_SUBTYPE, &subtype))) {
+            std::string s_subtype = GUIDToSubtypeString(subtype);
+            snprintf(fmt.subtype, MAX_SUBTYPE_NAME_LEN, "%s", s_subtype.c_str());
         }
 
-        // Crear una instancia de CameraFormat para almacenar los datos
-        CameraFormat currentFormat = {}; // Inicializa a cero para evitar basura
-
-        // Obtener el subtipo de video
-        if (SUCCEEDED(pType->GetGUID(MF_MT_SUBTYPE, &subtypeGuid))) {
-            std::string s_subtype = GUIDToSubtypeString(subtypeGuid);
-            // Copia segura de la cadena al array de char.
-            // snprintf es más seguro que strcpy. Asegura terminación nula.
-            snprintf(currentFormat.subtype, MAX_SUBTYPE_NAME_LEN, "%s", s_subtype.c_str());
-        }
-        else {
-            // Si no se puede obtener el GUID del subtipo, usa un valor por defecto
-            snprintf(currentFormat.subtype, MAX_SUBTYPE_NAME_LEN, "UNKNOWN_GUID");
-        }
-
-        // Obtener tamaño
         if (SUCCEEDED(MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height))) {
-            currentFormat.width = width;
-            currentFormat.height = height;
-        }
-        else {
-            // Si falla la obtención de tamaño, usa 0 o un valor indicativo
-            currentFormat.width = 0;
-            currentFormat.height = 0;
-            std::cerr << "Advertencia: No se pudo obtener el tamaño del frame para el tipo de medio " << i << ". HRESULT: 0x" << std::hex << pType->GetGUID(MF_MT_MAJOR_TYPE, &subtypeGuid) << std::endl;
+            fmt.width = width;
+            fmt.height = height;
         }
 
-        // Obtener tasa de cuadros
         if (SUCCEEDED(MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, &num, &den))) {
-            currentFormat.fps_num = num;
-            currentFormat.fps_den = den;
-        }
-        else {
-            // Si falla la obtención de FPS, usa 0 o un valor indicativo
-            currentFormat.fps_num = 0;
-            currentFormat.fps_den = 1; // Evitar división por cero
-            std::cerr << "Advertencia: No se pudo obtener el FPS para el tipo de medio " << i << ". HRESULT: 0x" << std::hex << pType->GetGUID(MF_MT_MAJOR_TYPE, &subtypeGuid) << std::endl;
+            fmt.fps_num = num;
+            fmt.fps_den = den;
         }
 
-        result.push_back(currentFormat); // Añadir el formato a nuestro vector
-        pType->Release(); // Liberar el tipo de medio
-        pType = nullptr;
-        ++i;
+        result.push_back(fmt);
+        pType->Release();
     }
 
-cleanup: // Etiqueta para la limpieza de recursos
-    if (pReader) { pReader->Release(); }
-    if (pSource) { pSource->Release(); }
-    for (UINT32 j = 0; j < numDevices; j++) {
+cleanup:
+    if (pHandler) pHandler->Release();
+    if (pSD) pSD->Release();
+    if (pPD) pPD->Release();
+    if (pSource) pSource->Release();
+    for (UINT32 j = 0; j < numDevices; ++j) {
         if (ppDevices[j]) ppDevices[j]->Release();
     }
-    CoTaskMemFree(ppDevices); // Libera el array de punteros
-    if (pAttributes) { pAttributes->Release(); }
-
-    // MFShutdown() solo si MFStartup() se llamó aquí y no se gestiona globalmente.
-    // if (SUCCEEDED(hr)) { // Si MFStartup fue exitoso y se gestiona aquí
-    //     MFShutdown();
-    // }
-
+    CoTaskMemFree(ppDevices);
+    if (pAttributes) pAttributes->Release();
+    MFShutdown();
 
     if (!result.empty()) {
-        *count = static_cast<int>(result.size());
-        // Asigna memoria en el heap y copia los resultados
+        *count = (int)result.size();
         *formats = new CameraFormat[*count];
         memcpy(*formats, result.data(), sizeof(CameraFormat) * (*count));
-        return true; // Éxito
+        return true;
     }
-
-    return FAILED(hr) ? false : (result.empty() ? false : true); // Retorna false si hubo un error o si no se encontraron formatos
+    return false;
 }
 
-void FreeFormats(CameraFormat* formats)
-{
-    delete[] formats;
+
+void FreeFormats(CameraFormat* formats) { delete[] formats; }
+
+bool SaveBMP(wchar_t* filename, BYTE* data, LONG width, LONG height, DWORD stride) {
+    BITMAPFILEHEADER bfh = {};
+    BITMAPINFOHEADER bih = {};
+
+    bih.biSize = sizeof(BITMAPINFOHEADER);
+    bih.biWidth = width;
+    bih.biHeight = -height;
+    bih.biPlanes = 1;
+    bih.biBitCount = 32;
+    bih.biCompression = BI_RGB;
+
+    DWORD imageSize = stride * height;
+    bfh.bfType = 0x4D42;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+    bfh.bfSize = bfh.bfOffBits + imageSize;
+
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) return false;
+
+    file.write((const char*)&bfh, sizeof(bfh));
+    file.write((const char*)&bih, sizeof(bih));
+    file.write((const char*)data, imageSize);
+
+    return true;
+}
+
+bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
+    HRESULT hr = S_OK;
+    ComPtr<IMFAttributes> pAttributes;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 numDevices = 0;
+
+    MFCreateAttributes(&pAttributes, 1);
+    pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    hr = MFEnumDeviceSources(pAttributes.Get(), &ppDevices, &numDevices);
+    if (FAILED(hr)) return false;
+
+    ComPtr<IMFMediaSource> pSource;
+    for (UINT32 i = 0; i < numDevices; ++i) {
+        WCHAR* name = nullptr;
+        UINT32 cchName = 0;
+        if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName))) {
+            if (wcscmp(cameraFriendlyName, name) == 0) {
+                hr = ppDevices[i]->ActivateObject(IID_PPV_ARGS(&pSource));
+                CoTaskMemFree(name);
+                break;
+            }
+            CoTaskMemFree(name);
+        }
+    }
+
+    if (!pSource || FAILED(hr)) {
+        for (UINT32 i = 0; i < numDevices; ++i)
+            if (ppDevices[i]) ppDevices[i]->Release();
+        CoTaskMemFree(ppDevices);
+        MFShutdown();
+        return false;
+    }
+
+    ComPtr<IMFSourceReader> pReader;
+    hr = MFCreateSourceReaderFromMediaSource(pSource.Get(), NULL, &pReader);
+    if (FAILED(hr)) return false;
+
+    ComPtr<IMFMediaType> pTypeOut;
+    MFCreateMediaType(&pTypeOut);
+    pTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    pTypeOut->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_YUY2);
+    pReader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pTypeOut.Get());
+
+    ComPtr<IMFSample> pSample;
+    DWORD streamIndex = 0, flags = 0;
+    LONGLONG timestamp = 0;
+    for (int tries = 0; tries < 10; ++tries) {
+        hr = pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &timestamp, &pSample);
+        if (FAILED(hr)) break;
+        if (pSample) break;
+        Sleep(100);
+    }
+    if (!pSample) return false;
+
+    ComPtr<IMFTransform> pTransform;
+    CoCreateInstance(CLSID_CColorConvertDMO, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pTransform));
+
+    ComPtr<IMFMediaType> pInputType;
+    MFCreateMediaType(&pInputType);
+    pInputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    pInputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_YUY2);
+
+    ComPtr<IMFMediaType> pCurrentType;
+    pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrentType);
+    UINT32 width = 0, height = 0;
+    MFGetAttributeSize(pCurrentType.Get(), MF_MT_FRAME_SIZE, &width, &height);
+
+    MFSetAttributeSize(pInputType.Get(), MF_MT_FRAME_SIZE, width, height);
+    MFSetAttributeRatio(pInputType.Get(), MF_MT_FRAME_RATE, 30, 1);
+    pTransform->SetInputType(0, pInputType.Get(), 0);
+
+    ComPtr<IMFMediaType> pOutputType;
+    MFCreateMediaType(&pOutputType);
+    pOutputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    pOutputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    MFSetAttributeSize(pOutputType.Get(), MF_MT_FRAME_SIZE, width, height);
+    MFSetAttributeRatio(pOutputType.Get(), MF_MT_FRAME_RATE, 30, 1);
+    pTransform->SetOutputType(0, pOutputType.Get(), 0);
+
+    pTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+    pTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+    pTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+    pTransform->ProcessInput(0, pSample.Get(), 0);
+
+    MFT_OUTPUT_STREAM_INFO streamInfo = {};
+    pTransform->GetOutputStreamInfo(0, &streamInfo);
+
+    ComPtr<IMFMediaBuffer> pBufferOut;
+    MFCreateMemoryBuffer(streamInfo.cbSize, &pBufferOut);
+
+    ComPtr<IMFSample> pSampleOut;
+    MFCreateSample(&pSampleOut);
+    pSampleOut->AddBuffer(pBufferOut.Get());
+
+    MFT_OUTPUT_DATA_BUFFER outputData = {};
+    outputData.dwStreamID = 0;
+    outputData.pSample = pSampleOut.Get();
+
+    DWORD status = 0;
+    hr = pTransform->ProcessOutput(0, 1, &outputData, &status);
+    if (FAILED(hr)) return false;
+
+    BYTE* pData = nullptr;
+    DWORD maxLen = 0, currLen = 0;
+    hr = pBufferOut->Lock(&pData, &maxLen, &currLen);
+    if (FAILED(hr)) return false;
+
+    LONG stride = width * 4;
+    SaveBMP(outputPath, pData, width, height, stride);
+
+    pBufferOut->Unlock();
+
+    for (UINT32 i = 0; i < numDevices; ++i) {
+        if (ppDevices[i]) ppDevices[i]->Release();
+    }
+    CoTaskMemFree(ppDevices);
+    MFShutdown();
+
+    return true;
 }
