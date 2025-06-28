@@ -124,8 +124,8 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalLibraryDirectories>$(WindowsSDK_LibraryPath);C:\Users\HOME\Downloads\opencv\build\x64\vc16\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);mfplat.lib;mf.lib;mfreadwrite.lib;mfplay.lib;mfuuid.lib;shlwapi.lib;Ole32.lib;OleAut32.lib;opencv_world490d.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(WindowsSDK_LibraryPath);</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies);mfplat.lib;mf.lib;mfreadwrite.lib;mfplay.lib;mfuuid.lib;shlwapi.lib;Ole32.lib;OleAut32.lib;</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy /Y /D "$(TargetPath)" "$(SolutionDir)CameraCaptureUI3\bin\$(Configuration)\"</Command>

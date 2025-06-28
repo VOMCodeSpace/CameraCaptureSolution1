@@ -232,20 +232,20 @@
             // labelCam1
             // 
             this.labelCam1.AutoSize = true;
-            this.labelCam1.Font = new System.Drawing.Font("Arial Narrow", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.labelCam1.Font = new System.Drawing.Font("Microsoft Sans Serif", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.labelCam1.Location = new System.Drawing.Point(13, 464);
             this.labelCam1.Name = "labelCam1";
-            this.labelCam1.Size = new System.Drawing.Size(64, 20);
+            this.labelCam1.Size = new System.Drawing.Size(73, 18);
             this.labelCam1.TabIndex = 18;
             this.labelCam1.Text = "Camara 1";
             // 
             // labelCam2
             // 
             this.labelCam2.AutoSize = true;
-            this.labelCam2.Font = new System.Drawing.Font("Arial Narrow", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.labelCam2.Font = new System.Drawing.Font("Microsoft Sans Serif", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.labelCam2.Location = new System.Drawing.Point(321, 461);
             this.labelCam2.Name = "labelCam2";
-            this.labelCam2.Size = new System.Drawing.Size(64, 20);
+            this.labelCam2.Size = new System.Drawing.Size(73, 18);
             this.labelCam2.TabIndex = 19;
             this.labelCam2.Text = "Camara 2";
             // 

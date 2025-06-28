@@ -41,7 +41,7 @@ extern "C" {
     __declspec(dllexport) void GetSymbolicLink(int index, wchar_t* nameBufferS, int bufferLength);
 
     // Vista previa de cámara
-    __declspec(dllexport) bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd, PreviewSession** session);
+    __declspec(dllexport) bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd);
     __declspec(dllexport) void StopPreview(PreviewSession** session);
 
     __declspec(dllexport) bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath);

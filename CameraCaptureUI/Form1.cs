@@ -236,7 +236,7 @@ namespace CameraCaptureUI
                         pictureBoxPreview.Invalidate();
                         if (!session1.Equals(IntPtr.Zero)) CameraInterop.StopPreview(ref session1);
                         IntPtr hwnd1 = pictureBoxPreview.Handle;
-                        CameraInterop.StartPreview(selected1.Name, hwnd1, out session1);
+                        CameraInterop.StartPreview(selected1.Name, hwnd1);
                         selectedIndexCam1 = selected1.Index;
                     }
                 }
@@ -257,7 +257,7 @@ namespace CameraCaptureUI
                                 pictureBoxPreview2.Invalidate();
                                 if (!session2.Equals(IntPtr.Zero)) CameraInterop.StopPreview(ref session2);
                                 IntPtr hwnd2 = pictureBoxPreview2.Handle;
-                                CameraInterop.StartPreview(selected2.Name, hwnd2, out session2);
+                                CameraInterop.StartPreview(selected2.Name, hwnd2);
                                 selectedIndexCam2 = selected2.Index;
                             }
                         }
@@ -635,7 +635,7 @@ public static class CameraInterop
     public static extern void GetCameraName(int index, [Out] char[] nameBuffer, int bufferLength);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartPreview(string cameraFriendlyName, IntPtr hwnd, out IntPtr session);
+    public static extern bool StartPreview(string cameraFriendlyName, IntPtr hwnd);
 
     [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void StopPreview(ref IntPtr session);

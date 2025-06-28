@@ -28,13 +28,21 @@
 #include <atlbase.h>
 #include <wrl/client.h>
 #include <fstream>
+#include <map>
 
+using namespace Gdiplus;
+
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mf.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")
+
+DEFINE_GUID(MF_READWRITE_ENABLE_VIDEO_PROCESSING,
+    0xA9D2A93C, 0xF2B7, 0x4D4C, 0x9C, 0x4F, 0xBC, 0xD3, 0x3C, 0x4B, 0x07, 0x6A);
+
 
 using namespace Gdiplus;
 using Microsoft::WRL::ComPtr;
@@ -116,6 +124,19 @@ struct MediaCaptureContext {
     std::atomic<LONGLONG> recordingStartTime = 0;
 };
 static MediaCaptureContext g_ctx;
+
+
+struct CameraInstance {
+    IMFMediaSource* mediaSource = nullptr;
+    IMFSourceReader* sourceReader = nullptr;
+    GUID videoSubtype = GUID_NULL;
+    std::thread previewThread;
+    HWND previewHwnd = nullptr;
+    bool stopPreview = false;
+};
+
+std::mutex g_instancesMutex;
+std::map<std::wstring, CameraInstance*> g_instances;
 
 extern "C" __declspec(dllexport) void __stdcall SetErrorCallback(ErrorCallbackFunc callback) {
     g_errorCallback = callback;
@@ -454,61 +475,269 @@ void GetMicrophoneName(int index, wchar_t* nameBuffer, int nameBufferSize) {
     }
 }
 
-bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd, PreviewSession** outSession)
-{
-    if (!outSession) return false;
+void ConvertNV12ToRGB32(const BYTE* nv12, BYTE* rgb, int width, int height) {
+    const BYTE* yPlane = nv12;
+    const BYTE* uvPlane = nv12 + width * height;
 
-    PreviewSession* session = new PreviewSession();
-    ZeroMemory(session, sizeof(PreviewSession));
-    session->hwndPreview = hwnd;
-    StopPreview(&session);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            int Y = yPlane[y * width + x];
+            int U = uvPlane[(y / 2) * width + (x & ~1)];
+            int V = uvPlane[(y / 2) * width + (x & ~1) + 1];
 
-    IMFPresentationDescriptor* pPD = nullptr;
-    IMFStreamDescriptor* pSD = nullptr;
-    IMFActivate* pSinkActivate = nullptr;
-    IMFTopologyNode* pSourceNode = nullptr;
-    IMFTopologyNode* pOutputNode = nullptr;
+            int C = Y - 16;
+            int D = U - 128;
+            int E = V - 128;
 
-    HRESULT hr;
+            int R = (298 * C + 409 * E + 128) >> 8;
+            int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
+            int B = (298 * C + 516 * D + 128) >> 8;
 
-    if (FAILED(hr = CreateMediaSourceFromDevice(cameraFriendlyName, &session->pSource))) return false;
-    if (FAILED(hr = MFCreateMediaSession(nullptr, &session->pSession))) return false;
-    if (FAILED(hr = session->pSource->CreatePresentationDescriptor(&pPD))) return false;
+            R = R < 0 ? 0 : R > 255 ? 255 : R;
+            G = G < 0 ? 0 : G > 255 ? 255 : G;
+            B = B < 0 ? 0 : B > 255 ? 255 : B;
 
-    BOOL fSelected;
-    if (FAILED(hr = pPD->GetStreamDescriptorByIndex(0, &fSelected, &pSD))) return false;
-    if (FAILED(hr = MFCreateVideoRendererActivate(hwnd, &pSinkActivate))) return false;
-    if (FAILED(hr = MFCreateTopology(&session->pTopology))) return false;
-
-    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &pSourceNode))) return false;
-    pSourceNode->SetUnknown(MF_TOPONODE_SOURCE, session->pSource);
-    pSourceNode->SetUnknown(MF_TOPONODE_PRESENTATION_DESCRIPTOR, pPD);
-    pSourceNode->SetUnknown(MF_TOPONODE_STREAM_DESCRIPTOR, pSD);
-    session->pTopology->AddNode(pSourceNode);
-
-    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &pOutputNode))) return false;
-    pOutputNode->SetObject(pSinkActivate);
-    session->pTopology->AddNode(pOutputNode);
-    pSourceNode->ConnectOutput(0, pOutputNode, 0);
-
-    hr = session->pSession->SetTopology(0, session->pTopology);
-
-    PROPVARIANT varStart;
-    PropVariantInit(&varStart);
-    hr = session->pSession->Start(&GUID_NULL, &varStart);
-    PropVariantClear(&varStart);
-
-    // Limpieza local (no limpia la sesión que sigue viva)
-    pPD->Release();
-    pSD->Release();
-    pSinkActivate->Release();
-    pSourceNode->Release();
-    pOutputNode->Release();
-
-    *outSession = session;
-
-    return SUCCEEDED(hr);
+            int offset = (y * width + x) * 4;
+            rgb[offset + 0] = (BYTE)B;
+            rgb[offset + 1] = (BYTE)G;
+            rgb[offset + 2] = (BYTE)R;
+            rgb[offset + 3] = 255;
+        }
+    }
 }
+
+
+void ConvertYUY2ToRGB32(const BYTE* src, BYTE* dst, int width, int height) {
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; x += 2) {
+            int index = y * width * 2 + x * 2;
+
+            BYTE Y0 = src[index];
+            BYTE U = src[index + 1];
+            BYTE Y1 = src[index + 2];
+            BYTE V = src[index + 3];
+
+            auto Convert = [](BYTE y, BYTE u, BYTE v) -> DWORD {
+                int c = y - 16;
+                int d = u - 128;
+                int e = v - 128;
+                int r = (298 * c + 409 * e + 128) >> 8;
+                int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+                int b = (298 * c + 516 * d + 128) >> 8;
+                r = min(max(r, 0), 255);
+                g = min(max(g, 0), 255);
+                b = min(max(b, 0), 255);
+                return RGB(b, g, r);
+                };
+
+            DWORD pixel1 = Convert(Y0, U, V);
+            DWORD pixel2 = Convert(Y1, U, V);
+
+            int dstIndex = y * width * 4 + x * 4;
+            ((DWORD*)(dst + dstIndex))[0] = pixel1;
+            ((DWORD*)(dst + dstIndex))[1] = pixel2;
+        }
+    }
+}
+
+bool StartPreview(wchar_t* cameraName, HWND hwndPreview) {
+    IMFAttributes* pAttributes = nullptr;
+    IMFActivate** ppDevices = nullptr;
+    UINT32 count = 0;
+
+    if (FAILED(MFCreateAttributes(&pAttributes, 1))) return false;
+    pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+    if (FAILED(MFEnumDeviceSources(pAttributes, &ppDevices, &count))) {
+        pAttributes->Release();
+        return false;
+    }
+
+    CameraInstance* instance = new CameraInstance();
+    bool found = false;
+
+    for (UINT32 i = 0; i < count; i++) {
+        WCHAR* name = nullptr;
+        UINT32 len = 0;
+        if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &len))) {
+            if (wcscmp(name, cameraName) == 0) {
+                if (SUCCEEDED(ppDevices[i]->ActivateObject(IID_PPV_ARGS(&instance->mediaSource)))) {
+                    found = true;
+                }
+                CoTaskMemFree(name);
+                break;
+            }
+            CoTaskMemFree(name);
+        }
+    }
+
+    for (UINT32 i = 0; i < count; i++) ppDevices[i]->Release();
+    CoTaskMemFree(ppDevices);
+    pAttributes->Release();
+
+    if (!found || !instance->mediaSource) {
+        delete instance;
+        return false;
+    }
+
+    if (FAILED(MFCreateSourceReaderFromMediaSource(instance->mediaSource, nullptr, &instance->sourceReader))) {
+        instance->mediaSource->Release();
+        delete instance;
+        return false;
+    }
+
+    IMFMediaType* selectedType = nullptr;
+    GUID subtype = GUID_NULL;
+
+    for (DWORD i = 0;; i++) {
+        IMFMediaType* pType = nullptr;
+        if (FAILED(instance->sourceReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &pType))) break;
+
+        UINT32 w = 0, h = 0;
+        MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
+        pType->GetGUID(MF_MT_SUBTYPE, &subtype);
+
+        if (w == 1280 && h == 720 && (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_YUY2)) {
+            selectedType = pType;
+            break;
+        }
+
+        pType->Release();
+    }
+
+    if (!selectedType) {
+        instance->sourceReader->Release();
+        instance->mediaSource->Release();
+        delete instance;
+        return false;
+    }
+
+    instance->sourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, selectedType);
+    instance->videoSubtype = subtype;  // Guardamos el tipo para uso posterior
+    selectedType->Release();
+
+    UINT32 width = 1280, height = 720;
+    instance->previewHwnd = hwndPreview;
+    instance->stopPreview = false;
+
+    instance->previewThread = std::thread([instance, width, height]() {
+        HDC hdc = GetDC(instance->previewHwnd);
+        BYTE* rgbBuffer = new BYTE[width * height * 4];
+
+        Gdiplus::Graphics graphics(hdc);
+        Gdiplus::Bitmap bitmap(width, height, PixelFormat32bppRGB);
+        Gdiplus::Rect rect(0, 0, width, height);
+
+        while (!instance->stopPreview) {
+            IMFSample* sample = nullptr;
+            DWORD streamIdx = 0, flags = 0;
+            LONGLONG ts = 0;
+
+            if (SUCCEEDED(instance->sourceReader->ReadSample(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIdx, &flags, &ts, &sample)) && sample) {
+
+                IMFMediaBuffer* buffer = nullptr;
+                if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buffer))) {
+                    BYTE* data = nullptr;
+                    DWORD maxLen = 0, curLen = 0;
+
+                    if (SUCCEEDED(buffer->Lock(&data, &maxLen, &curLen))) {
+                        // Convertir según el tipo de video
+                        if (instance->videoSubtype == MFVideoFormat_NV12) {
+                            ConvertNV12ToRGB32(data, rgbBuffer, width, height);
+                        }
+                        else if (instance->videoSubtype == MFVideoFormat_YUY2) {
+                            ConvertYUY2ToRGB32(data, rgbBuffer, width, height);
+                        }
+
+                        BitmapData bmpData;
+                        if (bitmap.LockBits(&rect, ImageLockModeWrite, PixelFormat32bppRGB, &bmpData) == Ok) {
+                            memcpy(bmpData.Scan0, rgbBuffer, width * height * 4);
+                            bitmap.UnlockBits(&bmpData);
+
+                            RECT rc;
+                            GetClientRect(instance->previewHwnd, &rc);
+                            int wndWidth = rc.right - rc.left;
+                            int wndHeight = rc.bottom - rc.top;
+
+                            graphics.DrawImage(&bitmap, 0, 0, wndWidth, wndHeight);
+                        }
+
+                        buffer->Unlock();
+                    }
+                    buffer->Release();
+                }
+                sample->Release();
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+
+        delete[] rgbBuffer;
+        ReleaseDC(instance->previewHwnd, hdc);
+        });
+
+    std::lock_guard<std::mutex> lock(g_instancesMutex);
+    g_instances[cameraName] = instance;
+    return true;
+}
+
+
+
+//bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd, PreviewSession** outSession)
+//{
+//    if (!outSession) return false;
+//
+//    PreviewSession* session = new PreviewSession();
+//    ZeroMemory(session, sizeof(PreviewSession));
+//    session->hwndPreview = hwnd;
+//    StopPreview(&session);
+//
+//    IMFPresentationDescriptor* pPD = nullptr;
+//    IMFStreamDescriptor* pSD = nullptr;
+//    IMFActivate* pSinkActivate = nullptr;
+//    IMFTopologyNode* pSourceNode = nullptr;
+//    IMFTopologyNode* pOutputNode = nullptr;
+//
+//    HRESULT hr;
+//
+//    if (FAILED(hr = CreateMediaSourceFromDevice(cameraFriendlyName, &session->pSource))) return false;
+//    if (FAILED(hr = MFCreateMediaSession(nullptr, &session->pSession))) return false;
+//    if (FAILED(hr = session->pSource->CreatePresentationDescriptor(&pPD))) return false;
+//
+//    BOOL fSelected;
+//    if (FAILED(hr = pPD->GetStreamDescriptorByIndex(0, &fSelected, &pSD))) return false;
+//    if (FAILED(hr = MFCreateVideoRendererActivate(hwnd, &pSinkActivate))) return false;
+//    if (FAILED(hr = MFCreateTopology(&session->pTopology))) return false;
+//
+//    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE, &pSourceNode))) return false;
+//    pSourceNode->SetUnknown(MF_TOPONODE_SOURCE, session->pSource);
+//    pSourceNode->SetUnknown(MF_TOPONODE_PRESENTATION_DESCRIPTOR, pPD);
+//    pSourceNode->SetUnknown(MF_TOPONODE_STREAM_DESCRIPTOR, pSD);
+//    session->pTopology->AddNode(pSourceNode);
+//
+//    if (FAILED(hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &pOutputNode))) return false;
+//    pOutputNode->SetObject(pSinkActivate);
+//    session->pTopology->AddNode(pOutputNode);
+//    pSourceNode->ConnectOutput(0, pOutputNode, 0);
+//
+//    hr = session->pSession->SetTopology(0, session->pTopology);
+//
+//    PROPVARIANT varStart;
+//    PropVariantInit(&varStart);
+//    hr = session->pSession->Start(&GUID_NULL, &varStart);
+//    PropVariantClear(&varStart);
+//
+//    // Limpieza local (no limpia la sesión que sigue viva)
+//    pPD->Release();
+//    pSD->Release();
+//    pSinkActivate->Release();
+//    pSourceNode->Release();
+//    pOutputNode->Release();
+//
+//    *outSession = session;
+//
+//    return SUCCEEDED(hr);
+//}
 
 void StopPreview(PreviewSession** session)
 {
@@ -734,14 +963,12 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     IMFMediaType* nativeAudioType = nullptr;
     IMFMediaType* outAudioType = nullptr;
     IMFActivate* pAudioActivate = nullptr;
-
+    
     if (g_ctx.isRecording.load()) return false;
 
-    hr = GetCameraDeviceActivate(cameraFriendlyName, &pVideoActivate);
-    if (FAILED(hr)) goto error;
-    hr = pVideoActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource));
-    pVideoActivate->Release();
-    if (FAILED(hr)) goto error;
+
+    g_ctx.videoSource = g_instances[cameraFriendlyName]->mediaSource;
+    g_ctx.videoReader = g_instances[cameraFriendlyName]->sourceReader;
 
     hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate);
     if (FAILED(hr)) goto error;
@@ -749,8 +976,6 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     pAudioActivate->Release();
     if (FAILED(hr)) goto error;
 
-    hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource, nullptr, &g_ctx.videoReader);
-    if (FAILED(hr)) goto error;
     hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader);
     if (FAILED(hr)) goto error;
 
@@ -851,7 +1076,7 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
                 pSample->Release();
             }
         }
-    });
+        });
 
     // 10. Hilo de audio
     g_ctx.audioThread = std::thread([]() {
@@ -880,8 +1105,8 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
                 pSample->Release();
             }
         }
-    });
-    
+        });
+
     g_ctx.recordingStartTime.store(MFGetSystemTime());
 
     // 11. Liberar tipos ya no necesarios
@@ -920,7 +1145,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     g_ctx.pauseStartTime = 0;
     g_ctx.isPaused = false;
     g_ctx.isRecording = true;
- 
+
     // 0. Limpiar estado anterior y verificar si ya está grabando
     StopRecorder(); // Asegura que los hilos anteriores estén detenidos y los recursos liberados
     // Si StopRecorder() no resetea isRecording, hazlo aquí.
@@ -956,7 +1181,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
         hr = GetCameraDeviceActivate(cameraFriendlyName, &pVideoActivate1); CHECK_HR(hr, "GetCameraDeviceActivate (Cam1)");
         hr = pVideoActivate1->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource)); CHECK_HR(hr, "ActivateObject (Cam1)");
     }
-    else 
+    else
     {
         g_ctx.videoSource = nullptr; // Asegurarse de que sea nulo si no se usa
         g_ctx.videoReader = nullptr; // Asegurarse de que sea nulo si no se usa
@@ -1023,13 +1248,13 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
 
 
     // 5. Crear SinkWriter para el archivo de salida
-    hr = MFCreateAttributes(&pAttributes, 1); 
+    hr = MFCreateAttributes(&pAttributes, 1);
     CHECK_HR(hr, "MFCreateAttributes for SinkWriter");
-    
+
     hr = pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE); // Habilitar transformaciones por hardware
     hr = pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE);
 
-    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, pAttributes, &g_ctx.sinkWriter); 
+    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, pAttributes, &g_ctx.sinkWriter);
     CHECK_HR(hr, "MFCreateSinkWriterFromURL");
     SAFE_RELEASE(pAttributes);
 
@@ -1106,139 +1331,139 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     // 10. Hilo de video
     if (g_ctx.videoReader && g_ctx.videoReader2)
     {
-        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen,finalOutputWidth, finalOutputHeight, cameraFriendlyName2,singleCamInputWidth, singleCamInputHeight]()
-        {
-            HRESULT hr_thread = S_OK; // Usar una HR local para el hilo
-            DWORD streamIndex, flags;
-            LONGLONG sampleTime = 0;
-            LONGLONG sampleTime2 = 0;
+        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen, finalOutputWidth, finalOutputHeight, cameraFriendlyName2, singleCamInputWidth, singleCamInputHeight]()
+            {
+                HRESULT hr_thread = S_OK; // Usar una HR local para el hilo
+                DWORD streamIndex, flags;
+                LONGLONG sampleTime = 0;
+                LONGLONG sampleTime2 = 0;
 
-            LONGLONG frameDuration = (10 * 1000 * 1000 * finalOutputFpsDen) / finalOutputFpsNum; // Duración del frame en 100ns
+                LONGLONG frameDuration = (10 * 1000 * 1000 * finalOutputFpsDen) / finalOutputFpsNum; // Duración del frame en 100ns
 
-            // Calcular tamaños para la composición de frames (NV12)
-            UINT32 singleCamYSize = singleCamInputWidth * singleCamInputHeight;
-            UINT32 singleCamUVSize = singleCamYSize / 2; // UV plane is half the size of Y for NV12
-            UINT32 totalCombinedYSize = finalOutputWidth * finalOutputHeight;
-            UINT32 totalCombinedUVSize = totalCombinedYSize / 2;
-            UINT32 totalCombinedFrameSize = totalCombinedYSize + totalCombinedUVSize; // Total buffer size for combined NV12 frame
+                // Calcular tamaños para la composición de frames (NV12)
+                UINT32 singleCamYSize = singleCamInputWidth * singleCamInputHeight;
+                UINT32 singleCamUVSize = singleCamYSize / 2; // UV plane is half the size of Y for NV12
+                UINT32 totalCombinedYSize = finalOutputWidth * finalOutputHeight;
+                UINT32 totalCombinedUVSize = totalCombinedYSize / 2;
+                UINT32 totalCombinedFrameSize = totalCombinedYSize + totalCombinedUVSize; // Total buffer size for combined NV12 frame
 
 
-            while (g_ctx.isRecording.load()) {
-                if (g_ctx.isPaused.load()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    continue;
-                }
+                while (g_ctx.isRecording.load()) {
+                    if (g_ctx.isPaused.load()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
 
-                IMFSample* pSample1 = nullptr;
-                IMFSample* pSample2 = nullptr;
-                // --- Leer frame de la PRIMERA cámara ---
-                // Solo intentamos leer si pSample1 es nullptr (ya se procesó el anterior)
-                hr_thread = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample1);
-                if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+                    IMFSample* pSample1 = nullptr;
+                    IMFSample* pSample2 = nullptr;
+                    // --- Leer frame de la PRIMERA cámara ---
+                    // Solo intentamos leer si pSample1 es nullptr (ya se procesó el anterior)
+                    hr_thread = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample1);
+                    if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
-                hr_thread = g_ctx.videoReader2->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime2, &pSample2);
-                if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+                    hr_thread = g_ctx.videoReader2->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime2, &pSample2);
+                    if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
-                // Si ambas cámaras están activas, esperar a tener ambos frames y luego combinarlos
-                if (pSample1 && pSample2) {
-                    if (g_ctx.baseTime == -1 && sampleTime > 0) g_ctx.baseTime = sampleTime; // Inicializar baseTime una vez
+                    // Si ambas cámaras están activas, esperar a tener ambos frames y luego combinarlos
+                    if (pSample1 && pSample2) {
+                        if (g_ctx.baseTime == -1 && sampleTime > 0) g_ctx.baseTime = sampleTime; // Inicializar baseTime una vez
 
-                    LONGLONG currentBaseTime = g_ctx.baseTime;
+                        LONGLONG currentBaseTime = g_ctx.baseTime;
 
-                    LONGLONG adjustedTime1 = (sampleTime - currentBaseTime) - g_ctx.totalPausedDuration;
-                    LONGLONG adjustedTime2 = (sampleTime2 - currentBaseTime) - g_ctx.totalPausedDuration;
+                        LONGLONG adjustedTime1 = (sampleTime - currentBaseTime) - g_ctx.totalPausedDuration;
+                        LONGLONG adjustedTime2 = (sampleTime2 - currentBaseTime) - g_ctx.totalPausedDuration;
 
-                    LONGLONG time1;
-                    hr_thread = pSample1->GetSampleTime(&time1);
-                    if (FAILED(hr_thread)) {
+                        LONGLONG time1;
+                        hr_thread = pSample1->GetSampleTime(&time1);
+                        if (FAILED(hr_thread)) {
+                            SAFE_RELEASE(pSample1);
+                            pSample1 = nullptr;
+                            g_ctx.isRecording.store(false); break;
+                        }
+                        pSample1->SetSampleTime(adjustedTime1);
+                        pSample1->SetSampleDuration(frameDuration);
+                        pSample2->SetSampleTime(adjustedTime2);
+                        pSample2->SetSampleDuration(frameDuration);
+
+
+                        LONGLONG combinedSampleTime = adjustedTime1; // Usar el tiempo de la primera cámara como referencia
+
+                        IMFSample* pCombinedSample = nullptr;
+                        IMFMediaBuffer* pCombinedBuffer = nullptr;
+
+                        hr_thread = MFCreateSample(&pCombinedSample);
+                        if (FAILED(hr_thread)) { break; }
+                        hr_thread = MFCreateMemoryBuffer(totalCombinedFrameSize, &pCombinedBuffer);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); break; }
+                        hr_thread = pCombinedSample->AddBuffer(pCombinedBuffer);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pCombinedBuffer); break; }
+
+                        BYTE* pCombinedData = nullptr;
+                        DWORD cbCombinedMaxLength = 0, cbCombinedCurrentLength = 0;
+                        hr_thread = pCombinedBuffer->Lock(&pCombinedData, &cbCombinedMaxLength, &cbCombinedCurrentLength);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pCombinedBuffer); break; }
+
+                        // --- Copiar datos de la PRIMERA CÁMARA (arriba) ---
+                        IMFMediaBuffer* pBuffer1 = nullptr;
+                        hr_thread = pSample1->ConvertToContiguousBuffer(&pBuffer1);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample1); SAFE_RELEASE(pSample2); continue; }
+                        BYTE* pData1 = nullptr; DWORD cbCurrentLength1 = 0;
+                        hr_thread = pBuffer1->Lock(&pData1, nullptr, &cbCurrentLength1);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pBuffer1); SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample1); SAFE_RELEASE(pSample2); continue; }
+
+                        // Copiar el plano Y (luminancia) de la primera cámara a la parte superior del buffer combinado
+                        memcpy(pCombinedData, pData1, singleCamYSize);
+                        // Copiar el plano UV (crominancia) de la primera cámara después de TODA la luminancia Y combinada
+                        // Esto es: pCombinedData + (ancho_total * alto_total) + UV_offset_para_primera_cam
+                        memcpy(pCombinedData + totalCombinedYSize, pData1 + singleCamYSize, singleCamUVSize);
+
+                        pBuffer1->Unlock();
+                        SAFE_RELEASE(pBuffer1);
+                        SAFE_RELEASE(pSample1); // Liberar el sample de la primera cámara una vez copiado
+                        pSample1 = nullptr; // Reiniciar para el siguiente frame
+
+                        // --- Copiar datos de la SEGUNDA CÁMARA (abajo) ---
+                        IMFMediaBuffer* pBuffer2 = nullptr;
+                        hr_thread = pSample2->ConvertToContiguousBuffer(&pBuffer2);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample2); continue; }
+                        BYTE* pData2 = nullptr; DWORD cbCurrentLength2 = 0;
+                        hr_thread = pBuffer2->Lock(&pData2, nullptr, &cbCurrentLength2);
+                        if (FAILED(hr_thread)) { SAFE_RELEASE(pBuffer2); SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample2); continue; }
+
+                        // Copiar el plano Y (luminancia) de la segunda cámara DESPUÉS del plano Y de la primera
+                        memcpy(pCombinedData + singleCamYSize, pData2, singleCamYSize);
+                        // Copiar el plano UV (crominancia) de la segunda cámara DESPUÉS de las UVs de la primera
+                        memcpy(pCombinedData + totalCombinedYSize + singleCamUVSize, pData2 + singleCamYSize, singleCamUVSize);
+
+                        pBuffer2->Unlock();
+                        SAFE_RELEASE(pBuffer2);
+                        SAFE_RELEASE(pSample2); // Liberar el sample de la segunda cámara una vez copiado
+                        pSample2 = nullptr; // Reiniciar para el siguiente frame
+
+                        pCombinedBuffer->SetCurrentLength(totalCombinedFrameSize); // Establecer la longitud final del buffer
+                        pCombinedBuffer->Unlock();
+                        SAFE_RELEASE(pCombinedBuffer); // Liberar el buffer combinado, ya está añadido al sample
+
+                        hr_thread = pCombinedSample->SetSampleTime(combinedSampleTime);
+                        hr_thread = pCombinedSample->SetSampleDuration(frameDuration);
+
+                        hr_thread = g_ctx.sinkWriter->WriteSample(g_ctx.videoStreamIndex, pCombinedSample);
+                        SAFE_RELEASE(pCombinedSample); // Liberar el sample combinado
+                        if (FAILED(hr_thread)) {
+                            g_ctx.isRecording.store(false); // Si la escritura falla, detener la grabación
+                            break;
+                        }
                         SAFE_RELEASE(pSample1);
-                        pSample1 = nullptr;
-                        g_ctx.isRecording.store(false); break;
+                        SAFE_RELEASE(pSample2);
+
+                        // Pequeña espera para no consumir CPU en exceso
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     }
-                    pSample1->SetSampleTime(adjustedTime1);
-                    pSample1->SetSampleDuration(frameDuration);
-                    pSample2->SetSampleTime(adjustedTime2);
-                    pSample2->SetSampleDuration(frameDuration);
-
-
-                    LONGLONG combinedSampleTime = adjustedTime1; // Usar el tiempo de la primera cámara como referencia
-
-                    IMFSample* pCombinedSample = nullptr;
-                    IMFMediaBuffer* pCombinedBuffer = nullptr;
-
-                    hr_thread = MFCreateSample(&pCombinedSample);
-                    if (FAILED(hr_thread)) { break; }
-                    hr_thread = MFCreateMemoryBuffer(totalCombinedFrameSize, &pCombinedBuffer);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); break; }
-                    hr_thread = pCombinedSample->AddBuffer(pCombinedBuffer);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pCombinedBuffer); break; }
-
-                    BYTE* pCombinedData = nullptr;
-                    DWORD cbCombinedMaxLength = 0, cbCombinedCurrentLength = 0;
-                    hr_thread = pCombinedBuffer->Lock(&pCombinedData, &cbCombinedMaxLength, &cbCombinedCurrentLength);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pCombinedBuffer); break; }
-
-                    // --- Copiar datos de la PRIMERA CÁMARA (arriba) ---
-                    IMFMediaBuffer* pBuffer1 = nullptr;
-                    hr_thread = pSample1->ConvertToContiguousBuffer(&pBuffer1);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample1); SAFE_RELEASE(pSample2); continue; }
-                    BYTE* pData1 = nullptr; DWORD cbCurrentLength1 = 0;
-                    hr_thread = pBuffer1->Lock(&pData1, nullptr, &cbCurrentLength1);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pBuffer1); SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample1); SAFE_RELEASE(pSample2); continue; }
-
-                    // Copiar el plano Y (luminancia) de la primera cámara a la parte superior del buffer combinado
-                    memcpy(pCombinedData, pData1, singleCamYSize);
-                    // Copiar el plano UV (crominancia) de la primera cámara después de TODA la luminancia Y combinada
-                    // Esto es: pCombinedData + (ancho_total * alto_total) + UV_offset_para_primera_cam
-                    memcpy(pCombinedData + totalCombinedYSize, pData1 + singleCamYSize, singleCamUVSize);
-
-                    pBuffer1->Unlock();
-                    SAFE_RELEASE(pBuffer1);
-                    SAFE_RELEASE(pSample1); // Liberar el sample de la primera cámara una vez copiado
-                    pSample1 = nullptr; // Reiniciar para el siguiente frame
-
-                    // --- Copiar datos de la SEGUNDA CÁMARA (abajo) ---
-                    IMFMediaBuffer* pBuffer2 = nullptr;
-                    hr_thread = pSample2->ConvertToContiguousBuffer(&pBuffer2);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample2); continue; }
-                    BYTE* pData2 = nullptr; DWORD cbCurrentLength2 = 0;
-                    hr_thread = pBuffer2->Lock(&pData2, nullptr, &cbCurrentLength2);
-                    if (FAILED(hr_thread)) { SAFE_RELEASE(pBuffer2); SAFE_RELEASE(pCombinedBuffer); SAFE_RELEASE(pCombinedSample); SAFE_RELEASE(pSample2); continue; }
-
-                    // Copiar el plano Y (luminancia) de la segunda cámara DESPUÉS del plano Y de la primera
-                    memcpy(pCombinedData + singleCamYSize, pData2, singleCamYSize);
-                    // Copiar el plano UV (crominancia) de la segunda cámara DESPUÉS de las UVs de la primera
-                    memcpy(pCombinedData + totalCombinedYSize + singleCamUVSize, pData2 + singleCamYSize, singleCamUVSize);
-
-                    pBuffer2->Unlock();
-                    SAFE_RELEASE(pBuffer2);
-                    SAFE_RELEASE(pSample2); // Liberar el sample de la segunda cámara una vez copiado
-                    pSample2 = nullptr; // Reiniciar para el siguiente frame
-
-                    pCombinedBuffer->SetCurrentLength(totalCombinedFrameSize); // Establecer la longitud final del buffer
-                    pCombinedBuffer->Unlock();
-                    SAFE_RELEASE(pCombinedBuffer); // Liberar el buffer combinado, ya está añadido al sample
-
-                    hr_thread = pCombinedSample->SetSampleTime(combinedSampleTime);
-                    hr_thread = pCombinedSample->SetSampleDuration(frameDuration);
-
-                    hr_thread = g_ctx.sinkWriter->WriteSample(g_ctx.videoStreamIndex, pCombinedSample);
-                    SAFE_RELEASE(pCombinedSample); // Liberar el sample combinado
-                    if (FAILED(hr_thread)) {
-                        g_ctx.isRecording.store(false); // Si la escritura falla, detener la grabación
-                        break;
+                    else { // Si aún no tenemos ambos frames (y cam2Index >= 0), esperar un poco
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
-                    SAFE_RELEASE(pSample1);
-                    SAFE_RELEASE(pSample2);
-
-                    // Pequeña espera para no consumir CPU en exceso
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
-                else { // Si aún no tenemos ambos frames (y cam2Index >= 0), esperar un poco
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                }
-            }
-        });
+            });
     }
     // 11. Hilo de audio
     if (g_ctx.audioReader) { // Solo si hay un lector de audio
@@ -1257,7 +1482,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                 IMFSample* pSample = nullptr;
                 hr_thread = g_ctx.audioReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
                 if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
-          
+
                 if (pSample) {
                     // ¡NUEVO! Obtener la duración del sample de audio
                     hr_thread = pSample->GetSampleDuration(&sampleDuration);
@@ -1283,7 +1508,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                     }
                 }
             }
-        });
+            });
     }
     g_ctx.recordingStartTime.store(MFGetSystemTime());
     return true; // Si todo el setup fue exitoso
@@ -1429,7 +1654,7 @@ bool SaveBMP(wchar_t* filename, BYTE* data, LONG width, LONG height, DWORD strid
 
     bih.biSize = sizeof(BITMAPINFOHEADER);
     bih.biWidth = width;
-    bih.biHeight = -height;
+    bih.biHeight = -height; // negativo para top-down
     bih.biPlanes = 1;
     bih.biBitCount = 32;
     bih.biCompression = BI_RGB;
@@ -1445,53 +1670,19 @@ bool SaveBMP(wchar_t* filename, BYTE* data, LONG width, LONG height, DWORD strid
     file.write((const char*)&bfh, sizeof(bfh));
     file.write((const char*)&bih, sizeof(bih));
     file.write((const char*)data, imageSize);
-
     return true;
 }
 
 bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
     HRESULT hr = S_OK;
-    ComPtr<IMFAttributes> pAttributes;
-    IMFActivate** ppDevices = nullptr;
-    UINT32 numDevices = 0;
 
-    MFCreateAttributes(&pAttributes, 1);
-    pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    hr = MFEnumDeviceSources(pAttributes.Get(), &ppDevices, &numDevices);
-    if (FAILED(hr)) return false;
-
-    ComPtr<IMFMediaSource> pSource;
-    for (UINT32 i = 0; i < numDevices; ++i) {
-        WCHAR* name = nullptr;
-        UINT32 cchName = 0;
-        if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &cchName))) {
-            if (wcscmp(cameraFriendlyName, name) == 0) {
-                hr = ppDevices[i]->ActivateObject(IID_PPV_ARGS(&pSource));
-                CoTaskMemFree(name);
-                break;
-            }
-            CoTaskMemFree(name);
-        }
-    }
-
-    if (!pSource || FAILED(hr)) {
-        for (UINT32 i = 0; i < numDevices; ++i)
-            if (ppDevices[i]) ppDevices[i]->Release();
-        CoTaskMemFree(ppDevices);
-        MFShutdown();
+    CameraInstance* instance = g_instances[cameraFriendlyName];
+    if (!instance || !instance->sourceReader || !instance->mediaSource)
         return false;
-    }
 
-    ComPtr<IMFSourceReader> pReader;
-    hr = MFCreateSourceReaderFromMediaSource(pSource.Get(), NULL, &pReader);
-    if (FAILED(hr)) return false;
+    IMFSourceReader* pReader = instance->sourceReader;
 
-    ComPtr<IMFMediaType> pTypeOut;
-    MFCreateMediaType(&pTypeOut);
-    pTypeOut->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    pTypeOut->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_YUY2);
-    pReader->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, NULL, pTypeOut.Get());
-
+    // Leer un frame
     ComPtr<IMFSample> pSample;
     DWORD streamIndex = 0, flags = 0;
     LONGLONG timestamp = 0;
@@ -1503,22 +1694,31 @@ bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
     }
     if (!pSample) return false;
 
+    // Obtener tipo de entrada actual
+    ComPtr<IMFMediaType> pCurrentType;
+    hr = pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrentType);
+    if (FAILED(hr)) return false;
+
+    UINT32 width = 0, height = 0;
+    MFGetAttributeSize(pCurrentType.Get(), MF_MT_FRAME_SIZE, &width, &height);
+
+    GUID subtype = {};
+    hr = pCurrentType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (FAILED(hr)) return false;
+
+    // Crear transform para convertir a RGB32
     ComPtr<IMFTransform> pTransform;
-    CoCreateInstance(CLSID_CColorConvertDMO, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pTransform));
+    hr = CoCreateInstance(CLSID_CColorConvertDMO, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pTransform));
+    if (FAILED(hr)) return false;
 
     ComPtr<IMFMediaType> pInputType;
     MFCreateMediaType(&pInputType);
     pInputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    pInputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_YUY2);
-
-    ComPtr<IMFMediaType> pCurrentType;
-    pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrentType);
-    UINT32 width = 0, height = 0;
-    MFGetAttributeSize(pCurrentType.Get(), MF_MT_FRAME_SIZE, &width, &height);
-
+    pInputType->SetGUID(MF_MT_SUBTYPE, subtype); // usa el tipo actual (ej. NV12 o YUY2)
     MFSetAttributeSize(pInputType.Get(), MF_MT_FRAME_SIZE, width, height);
     MFSetAttributeRatio(pInputType.Get(), MF_MT_FRAME_RATE, 30, 1);
-    pTransform->SetInputType(0, pInputType.Get(), 0);
+    hr = pTransform->SetInputType(0, pInputType.Get(), 0);
+    if (FAILED(hr)) return false;
 
     ComPtr<IMFMediaType> pOutputType;
     MFCreateMediaType(&pOutputType);
@@ -1526,18 +1726,24 @@ bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
     pOutputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
     MFSetAttributeSize(pOutputType.Get(), MF_MT_FRAME_SIZE, width, height);
     MFSetAttributeRatio(pOutputType.Get(), MF_MT_FRAME_RATE, 30, 1);
-    pTransform->SetOutputType(0, pOutputType.Get(), 0);
+    hr = pTransform->SetOutputType(0, pOutputType.Get(), 0);
+    if (FAILED(hr)) return false;
 
+    // Configurar transform
     pTransform->ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
     pTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     pTransform->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
-    pTransform->ProcessInput(0, pSample.Get(), 0);
+    hr = pTransform->ProcessInput(0, pSample.Get(), 0);
+    if (FAILED(hr)) return false;
 
+    // Preparar sample de salida
     MFT_OUTPUT_STREAM_INFO streamInfo = {};
-    pTransform->GetOutputStreamInfo(0, &streamInfo);
+    hr = pTransform->GetOutputStreamInfo(0, &streamInfo);
+    if (FAILED(hr)) return false;
 
     ComPtr<IMFMediaBuffer> pBufferOut;
-    MFCreateMemoryBuffer(streamInfo.cbSize, &pBufferOut);
+    hr = MFCreateMemoryBuffer(streamInfo.cbSize, &pBufferOut);
+    if (FAILED(hr)) return false;
 
     ComPtr<IMFSample> pSampleOut;
     MFCreateSample(&pSampleOut);
@@ -1551,21 +1757,15 @@ bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
     hr = pTransform->ProcessOutput(0, 1, &outputData, &status);
     if (FAILED(hr)) return false;
 
+    // Guardar BMP
     BYTE* pData = nullptr;
     DWORD maxLen = 0, currLen = 0;
     hr = pBufferOut->Lock(&pData, &maxLen, &currLen);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr) || currLen == 0) return false;
 
     LONG stride = width * 4;
-    SaveBMP(outputPath, pData, width, height, stride);
+    bool result = SaveBMP(outputPath, pData, width, height, stride);
 
     pBufferOut->Unlock();
-
-    for (UINT32 i = 0; i < numDevices; ++i) {
-        if (ppDevices[i]) ppDevices[i]->Release();
-    }
-    CoTaskMemFree(ppDevices);
-    MFShutdown();
-
-    return true;
+    return result;
 }
