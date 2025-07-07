@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
@@ -12,7 +13,6 @@ using static System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar;
 
 namespace CameraCaptureUI
 {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)] // Use Ansi for char[]
     public struct CameraListStruct
     {
         public int count;
@@ -32,12 +32,14 @@ namespace CameraCaptureUI
         private IntPtr session1 = IntPtr.Zero;
         private IntPtr session2 = IntPtr.Zero;
         bool isRecording = false;
-        bool isPause = false;
+        // bool isPause = false;
         private System.Windows.Forms.Timer delayTimer;
         private int delaySeconds = 10;
         private List<Button> delayedButtons = new List<Button>();
-        private int selectedIndexCam1 = -1;
-        private int selectedIndexCam2 = -1;
+        private string selectedNameCam1 = "";
+        private string selectedNameCam2 = "";
+        private bool previewCam1 = false;
+        private bool previewCam2 = false;
 
 
         private CameraInterop.ErrorCallback errorCallbackDelegate;
@@ -51,7 +53,7 @@ namespace CameraCaptureUI
             SetDllDirectory(path);
             checkBoxCamera2.Checked = false;
             delayTimer = new System.Windows.Forms.Timer();
-            delayTimer.Interval = delaySeconds * 900; // 9 segundos
+            delayTimer.Interval = delaySeconds * 500;
             delayTimer.Tick += DelayTimer_Tick;
         }
         private void EnableButtonsAfterDelay(List<Button> buttons, int delayInSeconds = 10)
@@ -66,7 +68,7 @@ namespace CameraCaptureUI
             delayedButtons = buttons;
 
             // Configura y arranca el timer
-            delayTimer.Interval = delayInSeconds * 900; // 9 segundos
+            delayTimer.Interval = delayInSeconds * 500; // 9 segundos
             delayTimer.Start();
         }
         private void DelayTimer_Tick(object sender, EventArgs e)
@@ -85,16 +87,20 @@ namespace CameraCaptureUI
         private async void Form1_Load(object sender, EventArgs e)
         {
             CameraInterop.InitializeCameraSystem();
-
             errorCallbackDelegate = ShowError;
             CameraInterop.SetErrorCallback(errorCallbackDelegate);
-            comboBoxCameras2.Enabled = false;
             LoadBitrate();
             LoadCameras();
             LoadMicrophones();
-            btnPause.Enabled = false;
-            btnContinue.Enabled = false;
+            comboBoxCameras2.Enabled = false;
             btnStop.Enabled = false;
+            comboBoxVideoFormatsCam1.Items.Clear();
+            comboBoxVideoFormatsCam2.Items.Clear();
+            comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
+            comboBoxVideoFormatsCam2.Text = "Seleccione una opción...";
+
+            //btnPause.Enabled = false;
+            //btnContinue.Enabled = false;
         }
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
@@ -121,36 +127,38 @@ namespace CameraCaptureUI
 
         private void LoadCameras()
         {
-            if (!session1.Equals(IntPtr.Zero))
+            comboBoxCameras1.Items.Clear();
+            comboBoxCameras1.Text = "Seleccione una opción...";
+            comboBoxCameras2.Items.Clear();
+            comboBoxCameras2.Text = "Seleccione una opción...";
+            if(!previewCam1)
             {
-                selectedIndexCam1 = -1;
-                pictureBoxPreview.Image = null;
-                pictureBoxPreview.Invalidate();
-                CameraInterop.StopPreview(ref session1);
+                comboBoxVideoFormatsCam1.Items.Clear();
+                comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
+            }
+            if (!previewCam2)
+            {
+                comboBoxVideoFormatsCam2.Items.Clear();
+                comboBoxVideoFormatsCam2.Text = "Seleccione una opción...";
             }
 
-            if (!session2.Equals(IntPtr.Zero))
-            {
-                selectedIndexCam2 = -1;
-                pictureBoxPreview2.Image = null;
-                pictureBoxPreview2.Invalidate();
-                CameraInterop.StopPreview(ref session2);
-            }
-            comboBoxCameras1.Items.Clear();
-            comboBoxCameras2.Items.Clear();
-            comboBoxCameras1.Text = "Seleccione una opción...";
-            comboBoxCameras2.Text = "Seleccione una opción...";
 
             int count = CameraInterop.GetCameraCount();
-            for (int i = 0; i < count; i++)
+            if (count > 0)
             {
-                char[] buffer = new char[256];
-                CameraInterop.GetCameraName(i, buffer, buffer.Length);
-                string name = new string(buffer).TrimEnd('\0');
-                comboBoxCameras1.Items.Add(new CameraItem { Name = name, Index = i });
-                comboBoxCameras2.Items.Add(new CameraItem { Name = name, Index = i });
+                for (int i = 0; i < count; i++)
+                {
+                    char[] buffer = new char[256];
+                    CameraInterop.GetCameraName(i, buffer, buffer.Length);
+                    string name = new string(buffer).TrimEnd('\0');
+                    if (name != "")
+                    {
+                        comboBoxCameras1.Items.Add(new CameraItem { Name = name, Index = i });
+                        comboBoxCameras2.Items.Add(new CameraItem { Name = name, Index = i });
+                    }
+                }
             }
-
+   
 
             // Maneja el evento CheckedChanged del CheckBox
             checkBoxCamera2.CheckedChanged += checkBox1_CheckedChanged;
@@ -178,8 +186,17 @@ namespace CameraCaptureUI
 
         private void LoadCameraFormats(string friendlyName, int Cam)
         {
-            comboBoxVideoFormatsCam1.Items.Clear();
-            comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
+            if (!previewCam1)
+            {
+                comboBoxVideoFormatsCam1.Items.Clear();
+                comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
+                
+            }
+            if (!previewCam2)
+            {
+                comboBoxVideoFormatsCam2.Items.Clear();
+                comboBoxVideoFormatsCam2.Text = "Seleccione una opción...";
+            }
 
             if (CameraInterop.GetSupportedFormats(friendlyName, out IntPtr ptr, out int count))
             {
@@ -218,67 +235,6 @@ namespace CameraCaptureUI
                 if (Cam == 2 && comboBoxVideoFormatsCam1.Items.Count > 0) comboBoxVideoFormatsCam2.SelectedIndex = 0;
                 CameraInterop.FreeFormats(ptr);
             }
-        }
-
-        private void startPreview()
-        {
-            if (comboBoxCameras1.SelectedItem == null && comboBoxCameras2.SelectedItem == null)
-            {
-                MessageBox.Show("Seleccione Camaras en los desplegables.");               
-            }
-            else
-            {
-                if (comboBoxCameras1.SelectedItem is CameraItem selected1)
-                {
-                    if (selectedIndexCam1 != selected1.Index)
-                    {
-                        pictureBoxPreview.Image = null;
-                        pictureBoxPreview.Invalidate();
-                        if (!session1.Equals(IntPtr.Zero)) CameraInterop.StopPreview(ref session1);
-                        IntPtr hwnd1 = pictureBoxPreview.Handle;
-                        CameraInterop.StartPreview(selected1.Name, hwnd1);
-                        selectedIndexCam1 = selected1.Index;
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Seleccione Camara 1 del desplegable");
-                }
-
-                if (checkBoxCamera2.Checked)
-                {
-                    if (comboBoxCameras2.SelectedItem is CameraItem selected2)
-                    {
-                        if (selectedIndexCam1 != selected2.Index) // CORRECTO
-                        {
-                            if (selectedIndexCam2 != selected2.Index)
-                            {
-                                pictureBoxPreview2.Image = null;
-                                pictureBoxPreview2.Invalidate();
-                                if (!session2.Equals(IntPtr.Zero)) CameraInterop.StopPreview(ref session2);
-                                IntPtr hwnd2 = pictureBoxPreview2.Handle;
-                                CameraInterop.StartPreview(selected2.Name, hwnd2);
-                                selectedIndexCam2 = selected2.Index;
-                            }
-                        }
-                        else
-                        {
-                            MessageBox.Show("En camara 2 seleccione una camara diferente a la camara 1");
-                        }
-                    }
-                    else
-                    {
-                        MessageBox.Show("Seleccione Camara 2 del desplegable");
-                    }
-                }
-            }
-            
-        }
-
-
-        private void btnPreview_Click(object sender, EventArgs e)
-        {
-            startPreview();
         }
 
         private void startRecording_Click(object sender, EventArgs e)
@@ -336,7 +292,7 @@ namespace CameraCaptureUI
                                 {
                                     if (cameraFriendlyName != null && cameraFriendlyName2 != null)
                                     {
-                                        isRecording = CameraInterop.StartRecordingTwoCameras(cameraFriendlyName, cameraFriendlyName2, micFriendlyName, saveDialog.FileName);
+                                        isRecording = CameraInterop.StartRecordingTwoCameras(cameraFriendlyName, cameraFriendlyName2, micFriendlyName, saveDialog.FileName, bitrate);
                                         if (isRecording)
                                         {
                                             labelStatusCam1.Text = "Camara 1 grabando...";
@@ -351,7 +307,8 @@ namespace CameraCaptureUI
                                     if (isRecording)
                                     {
                                         btnStart.Enabled = false;
-                                        EnableButtonsAfterDelay(new List<Button> { btnPause, btnStop }, 10);
+                                        // btnPreview.Enabled = false;
+                                        EnableButtonsAfterDelay(new List<Button> { btnStop }, 10);
                                     }
                                 }
                             }
@@ -378,84 +335,85 @@ namespace CameraCaptureUI
 
         }
 
-        private void pauseRecording_Click(object sender, EventArgs e)
-        {
-            if (isRecording)
-            {
-                if (!isPause)
-                {
-                    isPause = CameraInterop.PauseRecording();
-                    if (!isPause) MessageBox.Show("Espera unos segundos mientras la grabacion empieza.");
-                    if (isPause)
-                    {
-                        EnableButtonsAfterDelay(new List<Button> { btnContinue }, 10);
-                        btnPause.Enabled = false;
-                        if (checkBoxCamera2.Checked)
-                        {
-                            labelStatusCam1.Text = "Camara 1 en pausa...";
-                            labelStatusCam2.Text = "Camara 2 en pausa...";
-                        }
-                        else
-                        {
-                            labelStatusCam1.Text = "Camara 1 en pausa...";
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Grabacion ya esta pausada.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("No hay grabacion en proceso, por favor inicie una grabacion.");
-            }
-        }
+        //private void pauseRecording_Click(object sender, EventArgs e)
+        //{
+        //    if (isRecording)
+        //    {
+        //        if (!isPause)
+        //        {
+        //            isPause = CameraInterop.PauseRecording();
+        //            if (!isPause) MessageBox.Show("Espera unos segundos mientras la grabacion empieza.");
+        //            if (isPause)
+        //            {
+        //                EnableButtonsAfterDelay(new List<Button> { btnContinue }, 10);
+        //                btnPause.Enabled = false;
+        //                if (checkBoxCamera2.Checked)
+        //                {
+        //                    labelStatusCam1.Text = "Camara 1 en pausa...";
+        //                    labelStatusCam2.Text = "Camara 2 en pausa...";
+        //                }
+        //                else
+        //                {
+        //                    labelStatusCam1.Text = "Camara 1 en pausa...";
+        //                }
+        //            }
+        //        }
+        //        else
+        //        {
+        //            MessageBox.Show("Grabacion ya esta pausada.");
+        //        }
+        //    }
+        //    else
+        //    {
+        //        MessageBox.Show("No hay grabacion en proceso, por favor inicie una grabacion.");
+        //    }
+        //}
 
-        private void continueRecording_Click(object sender, EventArgs e)
-        {
-            if (isRecording)
-            {
-                if (isPause)
-                {
-                    bool continueRecording = CameraInterop.ContinueRecording();
-                    if (continueRecording)
-                    {
-                        EnableButtonsAfterDelay(new List<Button> { btnPause }, 10);
-                        isPause = false;
-                        btnContinue.Enabled = false;
-                        if (checkBoxCamera2.Checked)
-                        {
-                            labelStatusCam1.Text = "Camara 1 grabando...";
-                            labelStatusCam2.Text = "Camara 2 grabando...";
-                        }
-                        else
-                        {
-                            labelStatusCam1.Text = "Camara 1 grabando...";
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("La grabacion no esta en pausa porfavor pause primero.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("No hay grabacion en proceso, por favor inicie una.");
-            }
-        }
+        //private void continueRecording_Click(object sender, EventArgs e)
+        //{
+        //    if (isRecording)
+        //    {
+        //        if (isPause)
+        //        {
+        //            bool continueRecording = CameraInterop.ContinueRecording();
+        //            if (continueRecording)
+        //            {
+        //                EnableButtonsAfterDelay(new List<Button> { btnPause }, 10);
+        //                isPause = false;
+        //                btnContinue.Enabled = false;
+        //                if (checkBoxCamera2.Checked)
+        //                {
+        //                    labelStatusCam1.Text = "Camara 1 grabando...";
+        //                    labelStatusCam2.Text = "Camara 2 grabando...";
+        //                }
+        //                else
+        //                {
+        //                    labelStatusCam1.Text = "Camara 1 grabando...";
+        //                }
+        //            }
+        //        }
+        //        else
+        //        {
+        //            MessageBox.Show("La grabacion no esta en pausa porfavor pause primero.");
+        //        }
+        //    }
+        //    else
+        //    {
+        //        MessageBox.Show("No hay grabacion en proceso, por favor inicie una.");
+        //    }
+        //}
 
         private void stopRecording_Click(object sender, EventArgs e)
         {
             bool stopRecording = CameraInterop.StopRecording();
             if (stopRecording)
             {
-                EnableButtonsAfterDelay(new List<Button> { btnStart }, 10);
+                EnableButtonsAfterDelay(new List<Button> { btnStart }, 6);
                 isRecording = false;
-                btnPause.Enabled = false;
-                btnContinue.Enabled = false;
                 btnStop.Enabled = false;
+                //btnPause.Enabled = false;
+                //btnContinue.Enabled = false;
+                // btnPreview.Enabled = true;
                 if (checkBoxCamera2.Checked)
                 {
                     labelStatusCam1.Text = "Camara 1 Finalizo";
@@ -476,24 +434,6 @@ namespace CameraCaptureUI
         private void checkBox1_CheckedChanged(object sender, EventArgs e)
         {
             comboBoxCameras2.Enabled = checkBoxCamera2.Checked;
-        }
-
-        private void reloadCameras_Click(object sender, EventArgs e)
-        {
-            LoadCameras();
-        }
-
-        private void loadFormatsCam1_Click(object sender, EventArgs e)
-        {
-            if (comboBoxCameras1.SelectedItem is CameraItem selectedFormat)
-            {
-                LoadCameraFormats(selectedFormat.Name, 1);
-            }
-            else
-            {
-                MessageBox.Show("Seleccione Camara 1");
-            }
-
         }
 
         private void btnTakePhotoCam1_Click(object sender, EventArgs e)
@@ -532,32 +472,6 @@ namespace CameraCaptureUI
             else
             {
                 MessageBox.Show("Por favor seleccione la camara 1 en el desplegable.");
-            }
-        }
-
-        private void btnloadFormatsCam2_Click(object sender, EventArgs e)
-        {
-            if (checkBoxCamera2.Checked)
-            {
-                
-                if (comboBoxCameras1.SelectedItem is CameraItem selectedFormatCam1)
-                {
-                    if (comboBoxCameras2.SelectedItem is CameraItem selectedFormatCam2)
-                    {
-                        if (selectedFormatCam1 != selectedFormatCam2)
-                        {
-                            LoadCameraFormats(selectedFormatCam2.Name, 2);
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Seleccione Camara 1");
-                }
-            }
-            else
-            {
-                MessageBox.Show("Habilite Camara 2");    
             }
         }
 
@@ -607,6 +521,84 @@ namespace CameraCaptureUI
             }
 
         }
+
+        private void comboBoxCameras1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxCameras1.SelectedItem is CameraItem selected1)
+            {
+                if (selectedNameCam2 != selected1.Name) // CORRECTO
+                {
+                    pictureBoxPreview.Image = null;
+                    pictureBoxPreview.Invalidate();
+                    stopPreview(selectedNameCam1);
+                    IntPtr hwnd1 = pictureBoxPreview.Handle;
+                    previewCam1 = CameraInterop.StartPreview(selected1.Name, hwnd1);
+                    if (previewCam1)
+                    {
+                        LoadCameraFormats(selected1.Name, 1);
+                        selectedNameCam1 = selected1.Name;
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("En camara 1 seleccione una camara diferente a la camara 2");
+                }
+            }
+            else
+            {
+                MessageBox.Show("Seleccione Camara 1 del desplegable");
+            }
+        }
+
+        private void comboBoxCameras2_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (checkBoxCamera2.Checked)
+            {
+                if (comboBoxCameras2.SelectedItem is CameraItem selected2)
+                {
+                    if (selectedNameCam1 != selected2.Name) // CORRECTO
+                    {
+                        pictureBoxPreview2.Image = null;
+                        pictureBoxPreview2.Invalidate();
+                        stopPreview(selectedNameCam2);
+                        IntPtr hwnd2 = pictureBoxPreview2.Handle;
+                        previewCam2 = CameraInterop.StartPreview(selected2.Name, hwnd2);
+                        if (previewCam2)
+                        {
+                            LoadCameraFormats(selected2.Name, 2);
+                            selectedNameCam2 = selected2.Name;
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("En camara 2 seleccione una camara diferente a la camara 1");
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("Seleccione Camara 2 del desplegable");
+                }
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_DEVICECHANGE = 0x0219;
+            const int DBT_DEVNODES_CHANGED = 0x0007;
+
+            if (m.Msg == WM_DEVICECHANGE && (int)m.WParam == DBT_DEVNODES_CHANGED)
+            {
+                LoadCameras();
+            }
+
+            base.WndProc(ref m);
+        }
+
+        private void stopPreview(string cameraFriendlyName)
+        {
+            CameraInterop.StopPreview(cameraFriendlyName);
+        }
+
     }
 }
 public struct CameraList
@@ -637,8 +629,8 @@ public static class CameraInterop
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern bool StartPreview(string cameraFriendlyName, IntPtr hwnd);
 
-    [DllImport("CameraCaptureLib.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void StopPreview(ref IntPtr session);
+    [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
+    public static extern void StopPreview(string cameraFriendlyName);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern int GetMicrophoneCount();
@@ -650,7 +642,7 @@ public static class CameraInterop
     public static extern bool StartRecording(string cameraFriendlyName, string micFriendlyName, string outputPath, int indexFormat,int bitrate);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartRecordingTwoCameras(string cameraFriendlyName, string cameraFriendlyName2, string micFriendlyName, string outputPath);
+    public static extern bool StartRecordingTwoCameras(string cameraFriendlyName, string cameraFriendlyName2, string micFriendlyName, string outputPath, int bitrate);
 
     [DllImport("CameraCaptureLib.dll")]
     public static extern bool PauseRecording();

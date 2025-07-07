@@ -342,7 +342,7 @@ bool StopRecorder() {
     if (!g_ctx.isRecording) return false;
 
     g_ctx.isRecording = false;
-    g_ctx.isPaused = false;
+    // g_ctx.isPaused = false;
 
     // Esperar que los hilos terminen
     if (g_ctx.recordingThread.joinable()) g_ctx.recordingThread.join();
@@ -385,7 +385,7 @@ bool StopRecorder() {
     }
 
     if (g_ctx.audioSource) {
-        g_ctx.audioSource->Shutdown();  // Recomendado: hacer shutdown explícito
+        g_ctx.audioSource->Shutdown();
         g_ctx.audioSource->Release();
         g_ctx.audioSource = nullptr;
     }
@@ -739,92 +739,93 @@ bool StartPreview(wchar_t* cameraName, HWND hwndPreview) {
 //    return SUCCEEDED(hr);
 //}
 
-void StopPreview(PreviewSession** session)
-{
-    if (!session || !*session) return;
-    PreviewSession* s = *session;
+//void StopPreview(PreviewSession** session)
+//{
+//    if (!session || !*session) return;
+//    PreviewSession* s = *session;
+//
+//    if (s->pSession) {
+//        HRESULT hr;
+//
+//        // Detener sesión
+//        hr = s->pSession->Stop();
+//        if (FAILED(hr)) ReportError(L"[ERROR] Función Detener falló\n");
+//
+//        // Cerrar sesión
+//        hr = s->pSession->Close();
+//        if (FAILED(hr)) ReportError(L"[ERROR] Función Cerrar falló\n");
+//
+//        // Esperar a que se cierre
+//        IMFMediaEvent* pEvent = nullptr;
+//        MediaEventType meType = MEUnknown;
+//
+//        while (SUCCEEDED(s->pSession->GetEvent(0, &pEvent))) {
+//            if (SUCCEEDED(pEvent->GetType(&meType))) {
+//                if (meType == MESessionClosed) {
+//                    pEvent->Release();
+//                    break;
+//                }
+//            }
+//            pEvent->Release();
+//        }
+//
+//        s->pSession->Shutdown();
+//        s->pSession->Release();
+//        s->pSession = nullptr;
+//    }
+//
+//    if (s->hwndPreview) {
+//        InvalidateRect(s->hwndPreview, NULL, TRUE);
+//        UpdateWindow(s->hwndPreview);
+//        s->hwndPreview = nullptr;
+//    }
+//
+//    if (s->pSource) {
+//        s->pSource->Release();
+//        s->pSource = nullptr;
+//    }
+//
+//    if (s->pTopology) {
+//        s->pTopology->Release();
+//        s->pTopology = nullptr;
+//    }
+//}
 
-    if (s->pSession) {
-        HRESULT hr;
+//bool PauseRecorder() {
+//    if (g_ctx.isRecording) {
+//        if (!g_ctx.isPaused)
+//        {
+//            LONGLONG currentTime = MFGetSystemTime();
+//            if ((currentTime - g_ctx.recordingStartTime) < MIN_TIME_BEFORE_PAUSE_ALLOWED) return false;
+//            g_ctx.pauseStartTime = MFGetSystemTime();
+//            g_ctx.isPaused = true;
+//        }
+//        else return false;
+//    }
+//    else return false;
+//    return true;
+//}
 
-        // Detener sesión
-        hr = s->pSession->Stop();
-        if (FAILED(hr)) ReportError(L"[ERROR] Función Detener falló\n");
+//bool ContinueRecorder() {
+//    if (g_ctx.isRecording) {
+//        if (g_ctx.isPaused)
+//        {
+//            LONGLONG resumeTime = MFGetSystemTime();
+//            LONGLONG currentPauseDuration = resumeTime - g_ctx.pauseStartTime;
+//            LONGLONG oldTotalPausedDuration = g_ctx.totalPausedDuration;
+//            LONGLONG now = MFGetSystemTime();
+//            g_ctx.totalPausedDuration += (now - g_ctx.pauseStartTime);
+//            g_ctx.isPaused = false;
+//        }
+//        else return false;
+//    }
+//    else return false;
+//    return true;
+//}
 
-        // Cerrar sesión
-        hr = s->pSession->Close();
-        if (FAILED(hr)) ReportError(L"[ERROR] Función Cerrar falló\n");
+//bool PauseRecording() { return g_ctx.isRecording ? PauseRecorder() : false; }
+//bool ContinueRecording() { return g_ctx.isRecording ? ContinueRecorder() : false; }
 
-        // Esperar a que se cierre
-        IMFMediaEvent* pEvent = nullptr;
-        MediaEventType meType = MEUnknown;
-
-        while (SUCCEEDED(s->pSession->GetEvent(0, &pEvent))) {
-            if (SUCCEEDED(pEvent->GetType(&meType))) {
-                if (meType == MESessionClosed) {
-                    pEvent->Release();
-                    break;
-                }
-            }
-            pEvent->Release();
-        }
-
-        s->pSession->Shutdown();
-        s->pSession->Release();
-        s->pSession = nullptr;
-    }
-
-    if (s->hwndPreview) {
-        InvalidateRect(s->hwndPreview, NULL, TRUE);
-        UpdateWindow(s->hwndPreview);
-        s->hwndPreview = nullptr;
-    }
-
-    if (s->pSource) {
-        s->pSource->Release();
-        s->pSource = nullptr;
-    }
-
-    if (s->pTopology) {
-        s->pTopology->Release();
-        s->pTopology = nullptr;
-    }
-}
-
-bool PauseRecorder() {
-    if (g_ctx.isRecording) {
-        if (!g_ctx.isPaused)
-        {
-            LONGLONG currentTime = MFGetSystemTime();
-            if ((currentTime - g_ctx.recordingStartTime) < MIN_TIME_BEFORE_PAUSE_ALLOWED) return false;
-            g_ctx.pauseStartTime = MFGetSystemTime();
-            g_ctx.isPaused = true;
-        }
-        else return false;
-    }
-    else return false;
-    return true;
-}
-
-bool ContinueRecorder() {
-    if (g_ctx.isRecording) {
-        if (g_ctx.isPaused)
-        {
-            LONGLONG resumeTime = MFGetSystemTime();
-            LONGLONG currentPauseDuration = resumeTime - g_ctx.pauseStartTime;
-            LONGLONG oldTotalPausedDuration = g_ctx.totalPausedDuration;
-            LONGLONG now = MFGetSystemTime();
-            g_ctx.totalPausedDuration += (now - g_ctx.pauseStartTime);
-            g_ctx.isPaused = false;
-        }
-        else return false;
-    }
-    else return false;
-    return true;
-}
-
-bool PauseRecording() { return g_ctx.isRecording ? PauseRecorder() : false; }
-bool ContinueRecording() { return g_ctx.isRecording ? ContinueRecorder() : false; }
 bool StopRecording() { return g_ctx.isRecording ? StopRecorder() : false; }
 
 HRESULT SetPreferredMediaType(
@@ -966,9 +967,17 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     
     if (g_ctx.isRecording.load()) return false;
 
+    CameraInstance* instance = g_instances[cameraFriendlyName];
+    if (!instance || !instance->sourceReader || !instance->mediaSource)
+        return false;
 
-    g_ctx.videoSource = g_instances[cameraFriendlyName]->mediaSource;
-    g_ctx.videoReader = g_instances[cameraFriendlyName]->sourceReader;
+    IMFSourceReader* pReader = instance->sourceReader;
+
+    if (!instance->mediaSource)
+    {
+        ReportError(L"Error: instancia de la camara 1 no existe");
+        return false;
+    }
 
     hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate);
     if (FAILED(hr)) goto error;
@@ -979,10 +988,10 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader);
     if (FAILED(hr)) goto error;
 
-    // 3. Obtener tipo nativo video
-    hr = g_ctx.videoReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, indexFormat, &nativeVideoType);
+    // 3. Obtener tipo que queremos fijar al video
+    hr = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, indexFormat, &nativeVideoType);
     if (FAILED(hr)) goto error;
-    hr = g_ctx.videoReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeVideoType);
+    hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeVideoType);
     if (FAILED(hr)) goto error;
 
     // 4. Obtener tipo nativo audio
@@ -1051,7 +1060,7 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     g_ctx.isRecording = true; // se marca antes de lanzar los hilos
 
     // 9. Hilo de video
-    g_ctx.recordingThread = std::thread([num, den]() {
+    g_ctx.recordingThread = std::thread([num, den, pReader]() {
         DWORD streamIndex, flags;
         LONGLONG sampleTime = 0;
         LONGLONG frameDuration = (10 * 1000 * 1000 * den) / num;
@@ -1063,7 +1072,7 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
             }
 
             IMFSample* pSample = nullptr;
-            HRESULT hr = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
+            HRESULT hr = pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample);
 
             if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
@@ -1123,9 +1132,9 @@ error:
     if (nativeAudioType) nativeAudioType->Release();
     if (outVideoType) outVideoType->Release();
     if (outAudioType) outAudioType->Release();
-    if (g_ctx.videoSource) { g_ctx.videoSource->Release(); g_ctx.videoSource = nullptr; }
+    if (instance->mediaSource) { instance->mediaSource->Release(); instance->mediaSource = nullptr; }
     if (g_ctx.audioSource) { g_ctx.audioSource->Release(); g_ctx.audioSource = nullptr; }
-    if (g_ctx.videoReader) { g_ctx.videoReader->Release(); g_ctx.videoReader = nullptr; }
+    if (pReader) { pReader->Release(); g_ctx.videoReader = nullptr; }
     if (g_ctx.audioReader) { g_ctx.audioReader->Release(); g_ctx.audioReader = nullptr; }
     if (g_ctx.sinkWriter) { g_ctx.sinkWriter->Release(); g_ctx.sinkWriter = nullptr; }
 
@@ -1135,11 +1144,12 @@ error:
     return false;
 }
 
-bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath) {
+bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate) {
     if (g_ctx.isRecording) {
         ReportError(L"Error: La grabación ya está en curso.");
         return false;
     }
+
     g_ctx.baseTime.store(-1);
     g_ctx.totalPausedDuration = 0;
     g_ctx.pauseStartTime = 0;
@@ -1154,7 +1164,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     // --- Parámetros de Video de Salida Compuesto ---
     // Ajusta estos valores a la resolución y FPS que quieres para el archivo final.
     UINT32 finalOutputWidth = 1280; // Ancho total del video compuesto (ej: 2 cámaras una al lado de la otra)
-    UINT32 finalOutputHeight = (cameraFriendlyName) ? (720 * 2) : 720; // Alto total del video compuesto
+    UINT32 finalOutputHeight = (cameraFriendlyName && cameraFriendlyName2) ? (720 * 2) : 720; // Alto total del video compuesto
     UINT32 finalOutputFpsNum = 30; // Numerador de FPS del video compuesto
     UINT32 finalOutputFpsDen = 1;  // Denominador de FPS del video compuesto (ej: 30/1 = 30 FPS)
 
@@ -1174,27 +1184,31 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     IMFActivate* pVideoActivate1 = nullptr;
     IMFActivate* pVideoActivate2 = nullptr;
     IMFMediaType* sinkInputVideoType = nullptr;
+    IMFMediaType* nativeVideoType = nullptr;
+    IMFMediaType * nativeAudioType = nullptr;
 
-    // 1. Obtener los activadores de los dispositivos
-    if (cameraFriendlyName)
+    CameraInstance* instance = g_instances[cameraFriendlyName];
+    if (!instance || !instance->sourceReader || !instance->mediaSource)
+        return false;
+
+    IMFSourceReader* pReader = instance->sourceReader;
+
+    if (!instance->mediaSource)
     {
-        hr = GetCameraDeviceActivate(cameraFriendlyName, &pVideoActivate1); CHECK_HR(hr, "GetCameraDeviceActivate (Cam1)");
-        hr = pVideoActivate1->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource)); CHECK_HR(hr, "ActivateObject (Cam1)");
-    }
-    else
-    {
-        g_ctx.videoSource = nullptr; // Asegurarse de que sea nulo si no se usa
-        g_ctx.videoReader = nullptr; // Asegurarse de que sea nulo si no se usa
+        ReportError(L"Error: instancia de la camara 1 no existe");
+        return false;
     }
 
-    if (cameraFriendlyName and cameraFriendlyName2 != cameraFriendlyName) {
-        hr = GetCameraDeviceActivate(cameraFriendlyName2, &pVideoActivate2); CHECK_HR(hr, "GetCameraDeviceActivate (Cam2)");
-        hr = pVideoActivate2->ActivateObject(IID_PPV_ARGS(&g_ctx.videoSource2)); CHECK_HR(hr, "ActivateObject (Cam2)");
-    }
-    else
+    CameraInstance* instance2 = g_instances[cameraFriendlyName2];
+    if (!instance2 || !instance2->sourceReader || !instance2->mediaSource)
+        return false;
+
+    IMFSourceReader* pReader2 = instance2->sourceReader;
+
+    if (!instance2->mediaSource)
     {
-        g_ctx.videoSource2 = nullptr; // Asegurarse de que sea nulo si no se usa
-        g_ctx.videoReader2 = nullptr; // Asegurarse de que sea nulo si no se usa
+        ReportError(L"Error: instancia de la camara 2 no existe");
+        return false;
     }
 
     // Obtener activador de audio (si micIndex es válido)
@@ -1207,30 +1221,22 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
         g_ctx.audioReader = nullptr; // Asegurarse de que sea nulo si no se usa
     }
 
-
-    // 2. Crear SourceReaders desde los MediaSources
-    if (cameraFriendlyName and g_ctx.videoSource)
-    {
-        hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource, nullptr, &g_ctx.videoReader); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Cam1)");
-    }
-    if (cameraFriendlyName2 and g_ctx.videoSource2) {
-        hr = MFCreateSourceReaderFromMediaSource(g_ctx.videoSource2, nullptr, &g_ctx.videoReader2); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Cam2)");
-    }
     if (g_ctx.audioSource) { // Solo si hay fuente de audio
         hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Audio)");
     }
 
-    // 3. Configurar tipos de entrada de video para ambas cámaras (usando SetPreferredMediaType)
-    if (cameraFriendlyName)
-    {
-        hr = SetPreferredMediaType(g_ctx.videoReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
-        CHECK_HR(hr, "SetPreferredMediaType for primary camera");
-    }
+    // 4. Obtener tipo nativo audio
+    hr = g_ctx.audioReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeAudioType);
+    if (FAILED(hr)) goto error;
+    hr = g_ctx.audioReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, nativeAudioType);
+    if (FAILED(hr)) goto error;
 
-    if (cameraFriendlyName2) {
-        hr = SetPreferredMediaType(g_ctx.videoReader2, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
-        CHECK_HR(hr, "SetPreferredMediaType for secondary camera");
-    }
+    // 3. Configurar tipos de entrada de video para ambas cámaras (usando SetPreferredMediaType)
+    hr = SetPreferredMediaType(instance->sourceReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
+    CHECK_HR(hr, "SetPreferredMediaType for primary camera");
+
+    hr = SetPreferredMediaType(instance2->sourceReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
+    CHECK_HR(hr, "SetPreferredMediaType for secondary camera");
 
     // 4. Configurar el SourceReader de audio
     if (g_ctx.audioReader) {
@@ -1254,7 +1260,16 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     hr = pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE); // Habilitar transformaciones por hardware
     hr = pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE);
 
-    hr = MFCreateSinkWriterFromURL(outputPath, nullptr, pAttributes, &g_ctx.sinkWriter);
+    // 5. Crear SinkWriter con archivo temporal
+    wchar_t tempPath[MAX_PATH];
+    wchar_t outputPathCopy[MAX_PATH];
+    wcsncpy_s(outputPathCopy, outputPath, MAX_PATH);
+
+    // Elimina extensión original y añade .tmp.mp4
+    PathRemoveExtensionW(outputPathCopy);
+    swprintf_s(tempPath, L"%s.tmp.mp4", outputPathCopy);
+
+    hr = MFCreateSinkWriterFromURL(tempPath, nullptr, pAttributes, &g_ctx.sinkWriter);
     CHECK_HR(hr, "MFCreateSinkWriterFromURL");
     SAFE_RELEASE(pAttributes);
 
@@ -1263,7 +1278,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     hr = MFCreateMediaType(&outVideoType); CHECK_HR(hr, "MFCreateMediaType for outVideoType");
     hr = outVideoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); CHECK_HR(hr, "SetGUID MF_MT_MAJOR_TYPE (Video)");
     hr = outVideoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264); CHECK_HR(hr, "SetGUID MF_MT_SUBTYPE (H264)");
-    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, 128000);
+    hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, bitrate);
     hr = outVideoType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive); CHECK_HR(hr, "SetUINT32 MF_MT_INTERLACE_MODE");
     hr = MFSetAttributeRatio(outVideoType, MF_MT_FRAME_RATE, finalOutputFpsNum, finalOutputFpsDen); CHECK_HR(hr, "MFSetAttributeRatio (FPS)");
     hr = MFSetAttributeRatio(outVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1); CHECK_HR(hr, "MFSetAttributeRatio (PAR)");
@@ -1329,9 +1344,9 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     g_ctx.isRecording.store(true); // Se marca como grabando antes de lanzar los hilos
 
     // 10. Hilo de video
-    if (g_ctx.videoReader && g_ctx.videoReader2)
+    if (pReader && pReader2)
     {
-        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen, finalOutputWidth, finalOutputHeight, cameraFriendlyName2, singleCamInputWidth, singleCamInputHeight]()
+        g_ctx.recordingThread = std::thread([finalOutputFpsNum, finalOutputFpsDen, finalOutputWidth, finalOutputHeight, cameraFriendlyName2, singleCamInputWidth, singleCamInputHeight, pReader, pReader2]()
             {
                 HRESULT hr_thread = S_OK; // Usar una HR local para el hilo
                 DWORD streamIndex, flags;
@@ -1358,10 +1373,10 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                     IMFSample* pSample2 = nullptr;
                     // --- Leer frame de la PRIMERA cámara ---
                     // Solo intentamos leer si pSample1 es nullptr (ya se procesó el anterior)
-                    hr_thread = g_ctx.videoReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample1);
+                    hr_thread = pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample1);
                     if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
-                    hr_thread = g_ctx.videoReader2->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime2, &pSample2);
+                    hr_thread = pReader2->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime2, &pSample2);
                     if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
 
                     // Si ambas cámaras están activas, esperar a tener ambos frames y luego combinarlos
@@ -1511,6 +1526,8 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
             });
     }
     g_ctx.recordingStartTime.store(MFGetSystemTime());
+
+    MoveFileExW(tempPath, outputPath, MOVEFILE_REPLACE_EXISTING);
     return true; // Si todo el setup fue exitoso
 
 error:
@@ -1525,15 +1542,16 @@ error:
     SAFE_RELEASE(outAudioType);
 
     // Liberar los miembros de g_ctx si se asignaron
-    SAFE_RELEASE(g_ctx.videoSource);
-    SAFE_RELEASE(g_ctx.videoSource2);
+    SAFE_RELEASE(instance->mediaSource);
+    SAFE_RELEASE(instance2->mediaSource);
     SAFE_RELEASE(g_ctx.audioSource);
-    SAFE_RELEASE(g_ctx.videoReader);
-    SAFE_RELEASE(g_ctx.videoReader2);
+    SAFE_RELEASE(pReader);
+    SAFE_RELEASE(pReader2);
     SAFE_RELEASE(g_ctx.audioReader);
     SAFE_RELEASE(g_ctx.sinkWriter);
 
     // Asegurarse de que el contexto se resetee y la bandera de grabación se ponga a false
+    DeleteFileW(tempPath);
     g_ctx.isRecording.store(false);
     ResetContext(); // Si ResetContext libera los anteriores, algunos SAFE_RELEASE serían redundantes
 
@@ -1672,7 +1690,7 @@ bool SaveBMP(wchar_t* filename, BYTE* data, LONG width, LONG height, DWORD strid
     file.write((const char*)data, imageSize);
     return true;
 }
-
+// adsfs
 bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
     HRESULT hr = S_OK;
 
@@ -1768,4 +1786,50 @@ bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
 
     pBufferOut->Unlock();
     return result;
+}
+
+void StopPreview(wchar_t* cameraFriendlyName)
+{
+    if (g_ctx.isRecording == true)
+    {
+        ReportError(L"primero detenga la grabacion.");
+        return;
+    }
+
+    auto it = g_instances.find(cameraFriendlyName);
+    if (it == g_instances.end()) return;
+
+    CameraInstance* instance = it->second;
+    if (!instance) return;
+
+    // Señal para detener el hilo
+    instance->stopPreview = true;
+
+    // Esperar a que termine el hilo de preview
+    if (instance->previewThread.joinable()) {
+        instance->previewThread.join();
+    }
+
+    // Liberar Media Foundation resources
+    if (instance->sourceReader) {
+        instance->sourceReader->Release();
+        instance->sourceReader = nullptr;
+    }
+
+    if (instance->mediaSource) {
+        instance->mediaSource->Shutdown();
+        instance->mediaSource->Release();
+        instance->mediaSource = nullptr;
+    }
+
+    // Limpieza de ventana
+    if (instance->previewHwnd) {
+        InvalidateRect(instance->previewHwnd, NULL, TRUE);
+        UpdateWindow(instance->previewHwnd);
+        instance->previewHwnd = nullptr;
+    }
+
+    // Eliminar instancia
+    delete instance;
+    g_instances.erase(it);
 }

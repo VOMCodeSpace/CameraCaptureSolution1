@@ -29,19 +29,14 @@
         private void InitializeComponent()
         {
             this.comboBoxCameras1 = new System.Windows.Forms.ComboBox();
-            this.btnPreview = new System.Windows.Forms.Button();
             this.pictureBoxPreview = new System.Windows.Forms.PictureBox();
             this.btnStart = new System.Windows.Forms.Button();
-            this.btnPause = new System.Windows.Forms.Button();
-            this.btnContinue = new System.Windows.Forms.Button();
             this.btnStop = new System.Windows.Forms.Button();
             this.comboBoxMicrophones = new System.Windows.Forms.ComboBox();
             this.comboBoxCameras2 = new System.Windows.Forms.ComboBox();
             this.pictureBoxPreview2 = new System.Windows.Forms.PictureBox();
             this.comboBoxVideoFormatsCam1 = new System.Windows.Forms.ComboBox();
             this.checkBoxCamera2 = new System.Windows.Forms.CheckBox();
-            this.btnReloadCameras = new System.Windows.Forms.Button();
-            this.btnLoadFormatsCam1 = new System.Windows.Forms.Button();
             this.label1 = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
@@ -54,7 +49,6 @@
             this.comboBoxBitrates = new System.Windows.Forms.ComboBox();
             this.BitRate = new System.Windows.Forms.Label();
             this.comboBoxVideoFormatsCam2 = new System.Windows.Forms.ComboBox();
-            this.btnloadFormatsCam2 = new System.Windows.Forms.Button();
             this.label5 = new System.Windows.Forms.Label();
             this.btnTakePhotoCam2 = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxPreview)).BeginInit();
@@ -70,16 +64,7 @@
             this.comboBoxCameras1.Name = "comboBoxCameras1";
             this.comboBoxCameras1.Size = new System.Drawing.Size(264, 21);
             this.comboBoxCameras1.TabIndex = 0;
-            // 
-            // btnPreview
-            // 
-            this.btnPreview.Location = new System.Drawing.Point(667, 73);
-            this.btnPreview.Name = "btnPreview";
-            this.btnPreview.Size = new System.Drawing.Size(126, 23);
-            this.btnPreview.TabIndex = 1;
-            this.btnPreview.Text = "Vista Previa";
-            this.btnPreview.UseVisualStyleBackColor = true;
-            this.btnPreview.Click += new System.EventHandler(this.btnPreview_Click);
+            this.comboBoxCameras1.SelectedIndexChanged += new System.EventHandler(this.comboBoxCameras1_SelectedIndexChanged);
             // 
             // pictureBoxPreview
             // 
@@ -92,7 +77,7 @@
             // 
             // btnStart
             // 
-            this.btnStart.Location = new System.Drawing.Point(667, 118);
+            this.btnStart.Location = new System.Drawing.Point(667, 73);
             this.btnStart.Name = "btnStart";
             this.btnStart.Size = new System.Drawing.Size(126, 23);
             this.btnStart.TabIndex = 3;
@@ -100,29 +85,9 @@
             this.btnStart.UseVisualStyleBackColor = true;
             this.btnStart.Click += new System.EventHandler(this.startRecording_Click);
             // 
-            // btnPause
-            // 
-            this.btnPause.Location = new System.Drawing.Point(667, 158);
-            this.btnPause.Name = "btnPause";
-            this.btnPause.Size = new System.Drawing.Size(126, 23);
-            this.btnPause.TabIndex = 4;
-            this.btnPause.Text = "Pausar";
-            this.btnPause.UseVisualStyleBackColor = true;
-            this.btnPause.Click += new System.EventHandler(this.pauseRecording_Click);
-            // 
-            // btnContinue
-            // 
-            this.btnContinue.Location = new System.Drawing.Point(667, 203);
-            this.btnContinue.Name = "btnContinue";
-            this.btnContinue.Size = new System.Drawing.Size(126, 23);
-            this.btnContinue.TabIndex = 5;
-            this.btnContinue.Text = "Continuar";
-            this.btnContinue.UseVisualStyleBackColor = true;
-            this.btnContinue.Click += new System.EventHandler(this.continueRecording_Click);
-            // 
             // btnStop
             // 
-            this.btnStop.Location = new System.Drawing.Point(667, 247);
+            this.btnStop.Location = new System.Drawing.Point(667, 102);
             this.btnStop.Name = "btnStop";
             this.btnStop.Size = new System.Drawing.Size(126, 23);
             this.btnStop.TabIndex = 6;
@@ -145,6 +110,7 @@
             this.comboBoxCameras2.Name = "comboBoxCameras2";
             this.comboBoxCameras2.Size = new System.Drawing.Size(271, 21);
             this.comboBoxCameras2.TabIndex = 8;
+            this.comboBoxCameras2.SelectedIndexChanged += new System.EventHandler(this.comboBoxCameras2_SelectedIndexChanged);
             // 
             // pictureBoxPreview2
             // 
@@ -173,26 +139,6 @@
             this.checkBoxCamera2.Text = "Habilitar segunda camara";
             this.checkBoxCamera2.UseVisualStyleBackColor = true;
             // 
-            // btnReloadCameras
-            // 
-            this.btnReloadCameras.Location = new System.Drawing.Point(667, 28);
-            this.btnReloadCameras.Name = "btnReloadCameras";
-            this.btnReloadCameras.Size = new System.Drawing.Size(126, 23);
-            this.btnReloadCameras.TabIndex = 12;
-            this.btnReloadCameras.Text = "Cargar Cameras";
-            this.btnReloadCameras.UseVisualStyleBackColor = true;
-            this.btnReloadCameras.Click += new System.EventHandler(this.reloadCameras_Click);
-            // 
-            // btnLoadFormatsCam1
-            // 
-            this.btnLoadFormatsCam1.Location = new System.Drawing.Point(154, 79);
-            this.btnLoadFormatsCam1.Name = "btnLoadFormatsCam1";
-            this.btnLoadFormatsCam1.Size = new System.Drawing.Size(122, 23);
-            this.btnLoadFormatsCam1.TabIndex = 13;
-            this.btnLoadFormatsCam1.Text = "Cargar formatos Cam 1";
-            this.btnLoadFormatsCam1.UseVisualStyleBackColor = true;
-            this.btnLoadFormatsCam1.Click += new System.EventHandler(this.loadFormatsCam1_Click);
-            // 
             // label1
             // 
             this.label1.AutoSize = true;
@@ -214,7 +160,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(14, 84);
+            this.label3.Location = new System.Drawing.Point(9, 83);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(82, 13);
             this.label3.TabIndex = 16;
@@ -300,16 +246,6 @@
             this.comboBoxVideoFormatsCam2.Size = new System.Drawing.Size(271, 21);
             this.comboBoxVideoFormatsCam2.TabIndex = 34;
             // 
-            // btnloadFormatsCam2
-            // 
-            this.btnloadFormatsCam2.Location = new System.Drawing.Point(468, 79);
-            this.btnloadFormatsCam2.Name = "btnloadFormatsCam2";
-            this.btnloadFormatsCam2.Size = new System.Drawing.Size(126, 23);
-            this.btnloadFormatsCam2.TabIndex = 35;
-            this.btnloadFormatsCam2.Text = "Cagar formatos Cam 2";
-            this.btnloadFormatsCam2.UseVisualStyleBackColor = true;
-            this.btnloadFormatsCam2.Click += new System.EventHandler(this.btnloadFormatsCam2_Click);
-            // 
             // label5
             // 
             this.label5.AutoSize = true;
@@ -336,7 +272,6 @@
             this.ClientSize = new System.Drawing.Size(805, 499);
             this.Controls.Add(this.btnTakePhotoCam2);
             this.Controls.Add(this.label5);
-            this.Controls.Add(this.btnloadFormatsCam2);
             this.Controls.Add(this.comboBoxVideoFormatsCam2);
             this.Controls.Add(this.BitRate);
             this.Controls.Add(this.comboBoxBitrates);
@@ -349,19 +284,14 @@
             this.Controls.Add(this.label3);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
-            this.Controls.Add(this.btnLoadFormatsCam1);
-            this.Controls.Add(this.btnReloadCameras);
             this.Controls.Add(this.checkBoxCamera2);
             this.Controls.Add(this.comboBoxVideoFormatsCam1);
             this.Controls.Add(this.pictureBoxPreview2);
             this.Controls.Add(this.comboBoxCameras2);
             this.Controls.Add(this.comboBoxMicrophones);
             this.Controls.Add(this.btnStop);
-            this.Controls.Add(this.btnContinue);
-            this.Controls.Add(this.btnPause);
             this.Controls.Add(this.btnStart);
             this.Controls.Add(this.pictureBoxPreview);
-            this.Controls.Add(this.btnPreview);
             this.Controls.Add(this.comboBoxCameras1);
             this.Name = "Form1";
             this.Text = "Form1";
@@ -376,19 +306,14 @@
         #endregion
 
         private System.Windows.Forms.ComboBox comboBoxCameras1;
-        private System.Windows.Forms.Button btnPreview;
         private System.Windows.Forms.PictureBox pictureBoxPreview;
         private System.Windows.Forms.Button btnStart;
-        private System.Windows.Forms.Button btnPause;
-        private System.Windows.Forms.Button btnContinue;
         private System.Windows.Forms.Button btnStop;
         private System.Windows.Forms.ComboBox comboBoxMicrophones;
         private System.Windows.Forms.ComboBox comboBoxCameras2;
         private System.Windows.Forms.PictureBox pictureBoxPreview2;
         private System.Windows.Forms.ComboBox comboBoxVideoFormatsCam1;
         private System.Windows.Forms.CheckBox checkBoxCamera2;
-        private System.Windows.Forms.Button btnReloadCameras;
-        private System.Windows.Forms.Button btnLoadFormatsCam1;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label3;
@@ -401,7 +326,6 @@
         private System.Windows.Forms.ComboBox comboBoxBitrates;
         private System.Windows.Forms.Label BitRate;
         private System.Windows.Forms.ComboBox comboBoxVideoFormatsCam2;
-        private System.Windows.Forms.Button btnloadFormatsCam2;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.Button btnTakePhotoCam2;
     }
