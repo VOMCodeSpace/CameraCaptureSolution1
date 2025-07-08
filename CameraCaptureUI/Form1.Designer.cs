@@ -128,6 +128,7 @@
             this.comboBoxVideoFormatsCam1.Name = "comboBoxVideoFormatsCam1";
             this.comboBoxVideoFormatsCam1.Size = new System.Drawing.Size(264, 21);
             this.comboBoxVideoFormatsCam1.TabIndex = 10;
+            this.comboBoxVideoFormatsCam1.SelectedIndexChanged += new System.EventHandler(this.comboBoxVideoFormatsCam1_SelectedIndexChanged);
             // 
             // checkBoxCamera2
             // 

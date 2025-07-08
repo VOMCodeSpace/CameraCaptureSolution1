@@ -94,6 +94,7 @@ namespace CameraCaptureUI
             LoadMicrophones();
             comboBoxCameras2.Enabled = false;
             btnStop.Enabled = false;
+            comboBoxVideoFormatsCam1.Enabled = false;
             comboBoxVideoFormatsCam1.Items.Clear();
             comboBoxVideoFormatsCam2.Items.Clear();
             comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
@@ -186,20 +187,21 @@ namespace CameraCaptureUI
 
         private void LoadCameraFormats(string friendlyName, int Cam)
         {
-            if (!previewCam1)
-            {
-                comboBoxVideoFormatsCam1.Items.Clear();
-                comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
+            //if (!previewCam1)
+            //{
+            //    comboBoxVideoFormatsCam1.Items.Clear();
+            //    comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
                 
-            }
-            if (!previewCam2)
-            {
-                comboBoxVideoFormatsCam2.Items.Clear();
-                comboBoxVideoFormatsCam2.Text = "Seleccione una opción...";
-            }
+            //}
+            //if (!previewCam2)
+            //{
+            //    comboBoxVideoFormatsCam2.Items.Clear();
+            //    comboBoxVideoFormatsCam2.Text = "Seleccione una opción...";
+            //}
 
             if (CameraInterop.GetSupportedFormats(friendlyName, out IntPtr ptr, out int count))
             {
+                comboBoxVideoFormatsCam1.Enabled = true;
                 int size = Marshal.SizeOf<CameraFormat>();
                 var uniqueDescriptions = new HashSet<string>();
 
@@ -231,8 +233,6 @@ namespace CameraCaptureUI
                         }
                     }
                 }
-                if (Cam == 1 && comboBoxVideoFormatsCam1.Items.Count > 0) comboBoxVideoFormatsCam1.SelectedIndex = 0;
-                if (Cam == 2 && comboBoxVideoFormatsCam1.Items.Count > 0) comboBoxVideoFormatsCam2.SelectedIndex = 0;
                 CameraInterop.FreeFormats(ptr);
             }
         }
@@ -301,7 +301,7 @@ namespace CameraCaptureUI
                                     }
                                     else
                                     {
-                                        isRecording = CameraInterop.StartRecording(cameraFriendlyName, micFriendlyName, saveDialog.FileName, selectedFormat.Index, bitrate);
+                                        isRecording = CameraInterop.StartRecording(cameraFriendlyName, micFriendlyName, saveDialog.FileName, bitrate);
                                         labelStatusCam1.Text = "Camara 1 grabando...";
                                     }
                                     if (isRecording)
@@ -528,16 +528,8 @@ namespace CameraCaptureUI
             {
                 if (selectedNameCam2 != selected1.Name) // CORRECTO
                 {
-                    pictureBoxPreview.Image = null;
-                    pictureBoxPreview.Invalidate();
-                    stopPreview(selectedNameCam1);
-                    IntPtr hwnd1 = pictureBoxPreview.Handle;
-                    previewCam1 = CameraInterop.StartPreview(selected1.Name, hwnd1);
-                    if (previewCam1)
-                    {
-                        LoadCameraFormats(selected1.Name, 1);
-                        selectedNameCam1 = selected1.Name;
-                    }
+                    LoadCameraFormats(selected1.Name, 1);
+                    selectedNameCam1 = selected1.Name;
                 }
                 else
                 {
@@ -562,7 +554,7 @@ namespace CameraCaptureUI
                         pictureBoxPreview2.Invalidate();
                         stopPreview(selectedNameCam2);
                         IntPtr hwnd2 = pictureBoxPreview2.Handle;
-                        previewCam2 = CameraInterop.StartPreview(selected2.Name, hwnd2);
+                        previewCam2 = CameraInterop.StartPreview(selected2.Name, 0, hwnd2);
                         if (previewCam2)
                         {
                             LoadCameraFormats(selected2.Name, 2);
@@ -599,6 +591,20 @@ namespace CameraCaptureUI
             CameraInterop.StopPreview(cameraFriendlyName);
         }
 
+        private void comboBoxVideoFormatsCam1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxCameras1.SelectedItem is CameraItem selected)
+            {
+                pictureBoxPreview.Image = null;
+                pictureBoxPreview.Invalidate();
+                stopPreview(selectedNameCam1);
+                IntPtr hwnd1 = pictureBoxPreview.Handle;
+                if (comboBoxVideoFormatsCam1.SelectedItem is CameraFormatItem selectedFormat1)
+                {
+                    previewCam1 = CameraInterop.StartPreview(selected.Name, selectedFormat1.Index, hwnd1);   
+                }
+            }
+        }
     }
 }
 public struct CameraList
@@ -627,7 +633,7 @@ public static class CameraInterop
     public static extern void GetCameraName(int index, [Out] char[] nameBuffer, int bufferLength);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartPreview(string cameraFriendlyName, IntPtr hwnd);
+    public static extern bool StartPreview(string cameraFriendlyName, int indexCam, IntPtr hwnd);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern void StopPreview(string cameraFriendlyName);
@@ -639,7 +645,7 @@ public static class CameraInterop
     public static extern void GetMicrophoneName(int index, [Out] char[] nameBuffer, int nameBufferSize);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
-    public static extern bool StartRecording(string cameraFriendlyName, string micFriendlyName, string outputPath, int indexFormat,int bitrate);
+    public static extern bool StartRecording(string cameraFriendlyName, string micFriendlyName, string outputPath, int bitrate);
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern bool StartRecordingTwoCameras(string cameraFriendlyName, string cameraFriendlyName2, string micFriendlyName, string outputPath, int bitrate);

@@ -41,7 +41,7 @@ extern "C" {
     __declspec(dllexport) void GetSymbolicLink(int index, wchar_t* nameBufferS, int bufferLength);
 
     // Vista previa de cámara
-    __declspec(dllexport) bool StartPreview(wchar_t* cameraFriendlyName, HWND hwnd);
+    __declspec(dllexport) bool StartPreview(wchar_t* cameraFriendlyName, int indexcam, HWND hwnd);
     __declspec(dllexport) void StopPreview(wchar_t* cameraFriendlyName);
 
     __declspec(dllexport) bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath);
@@ -51,7 +51,7 @@ extern "C" {
     __declspec(dllexport) void GetMicrophoneName(int index, wchar_t* nameBuffer, int bufferLength);
 
     // Control de grabación
-    __declspec(dllexport) bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const wchar_t* outputPath, int indexFormat, int bitrate);
+    __declspec(dllexport) bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate);
     __declspec(dllexport) bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate);
     __declspec(dllexport) bool PauseRecording();
     __declspec(dllexport) bool ContinueRecording();
