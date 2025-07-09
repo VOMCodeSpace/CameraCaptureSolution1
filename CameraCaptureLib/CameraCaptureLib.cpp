@@ -598,6 +598,7 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
     HRESULT hr;
 
     if (FAILED(MFCreateAttributes(&pAttributes, 1))) return false;
+    pAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
     pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
     if (FAILED(MFEnumDeviceSources(pAttributes, &ppDevices, &count))) {
         pAttributes->Release();
@@ -895,7 +896,7 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
 
 bool StopRecording() { return g_ctx.isRecording ? StopRecorder() : false; }
 
-HRESULT SetPreferredMediaType(
+bool SetPreferredMediaType(
     IMFSourceReader* pReader,
     UINT32 targetWidth,
     UINT32 targetHeight,
@@ -911,7 +912,6 @@ HRESULT SetPreferredMediaType(
     // MJPEG y YUY2 son comunes y el SourceReader a menudo puede transcodificarlos a NV12.
     const GUID preferredSubtypes[] = {
         MFVideoFormat_NV12,
-        MFVideoFormat_MJPG,
         MFVideoFormat_YUY2,
         // Si encuentras otros GUIDs para formatos comunes como H.264 o otros YUV que la cámara
         // soporte y que creas que MF pueda transcodificar a NV12, puedes añadirlos aquí.
@@ -934,8 +934,7 @@ HRESULT SetPreferredMediaType(
 
             // ... rest of your SetPreferredMediaType logic for finding preferred types ...
             // If it's the ideal NV12
-            if (subtypeGuid == MFVideoFormat_NV12 &&
-                width_native == targetWidth && height_native == targetHeight &&
+            if (width_native == targetWidth && height_native == targetHeight &&
                 num_native == targetFpsNum && den_native == targetFpsDen) {
                 // ... (your existing logic for pFoundType and goto found_type)
             }
@@ -999,16 +998,21 @@ found_type:
     // Una vez que tengamos pFoundType (ya sea nativo o recién creado), intentamos aplicarlo
     if (pFoundType) {
         hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pFoundType);
-        if (FAILED(hr)) ReportError(L"Falló confgurando el formato");
+        if (FAILED(hr)) { 
+            ReportError(L"Falló confgurando el formato"); 
+            goto cleanup;
+        }
     }
     else {
         hr = E_UNEXPECTED; // No se encontró ningún tipo de medio para intentar
         ReportError(L"No se encontró ningún tipo de medio para intentar");
+        goto cleanup;
     }
+    return true;
 
 cleanup:
     if (pFoundType) { pFoundType->Release(); }
-    return hr;
+    return false;
 }
 
 bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate) {
@@ -1017,7 +1021,6 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
         return false;
     }
     StopRecorder();
-    ReportError(L"Error: 0");
     HRESULT hr = S_OK;
 
     UINT32 num = 0, den = 0;
@@ -1032,10 +1035,8 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     IMFActivate* pAudioActivate = nullptr;
     
     if (g_ctx.isRecording.load()) return false;
-    ReportError(L"Error: 1");
     CameraInstance* instance = g_instances[cameraFriendlyName];
     if (!instance || !instance->sourceReader || !instance->mediaSource) return false;
-    ReportError(L"Error: 2");
     IMFSourceReader* pReader = instance->sourceReader;
 
     if (!instance->mediaSource)
@@ -1049,19 +1050,15 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
         ReportError(L"Error: instancia lectora de la camara 1 no existe");
         return false;
     }
-    ReportError(L"Error: 22");
 
     hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate);
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 3");
     hr = pAudioActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource));
     pAudioActivate->Release();
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 4");
 
     hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader);
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 5");
 
     /*hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeVideoType);
     if (FAILED(hr)) goto error;
@@ -1070,14 +1067,11 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     // 4. Obtener tipo nativo audio
     hr = g_ctx.audioReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeAudioType);
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 8");
 
     hr = g_ctx.audioReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, nativeAudioType);
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 9");
 
     hr = MFCreateAttributes(&pAttributes, 1); if (FAILED(hr)) return hr;
-    ReportError(L"Error: 10");
 
     // Habilitar CBR explícitamente
     hr = pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE); // Opcional, para usar HW
@@ -1094,7 +1088,6 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
 
     hr = MFCreateSinkWriterFromURL(tempPath, nullptr, pAttributes, &g_ctx.sinkWriter);
     if (FAILED(hr)) goto error;
-    ReportError(L"Error: 11");
 
     // 6. Configurar tipo salida video (H264)
     hr = MFCreateMediaType(&outVideoType); if (FAILED(hr)) goto error;
@@ -1102,7 +1095,6 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     hr = outVideoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264); if (FAILED(hr)) goto error;
     hr = outVideoType->SetUINT32(MF_MT_AVG_BITRATE, bitrate); if (FAILED(hr)) goto error;
     hr = outVideoType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive); if (FAILED(hr)) goto error;
-    ReportError(L"Error: 12");
 
     // Extraer resolución y frame rate del tipo nativo seleccionado
     hr = MFGetAttributeSize(instance->nativeVideoType, MF_MT_FRAME_SIZE, &width, &height); if (FAILED(hr)) goto error;
@@ -1311,11 +1303,17 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     if (FAILED(hr)) goto error;
 
     // 3. Configurar tipos de entrada de video para ambas cámaras (usando SetPreferredMediaType)
-    hr = SetPreferredMediaType(instance->sourceReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
-    CHECK_HR(hr, "SetPreferredMediaType for primary camera");
+    hr = SetPreferredMediaType(pReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
+    if (!hr) { 
+        ReportError(L"Fallo SetPreferredMediaType en camara 1"); 
+        return false;
+    }
 
-    hr = SetPreferredMediaType(instance2->sourceReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
-    CHECK_HR(hr, "SetPreferredMediaType for secondary camera");
+    hr = SetPreferredMediaType(pReader2, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
+    if (!hr) {
+        ReportError(L"Fallo SetPreferredMediaType en camara 2");
+        return false;
+    }
 
     // 4. Configurar el SourceReader de audio
     if (g_ctx.audioReader) {
@@ -1874,11 +1872,9 @@ void StopPreview(wchar_t* cameraFriendlyName)
         ReportError(L"primero detenga la grabacion.");
         return;
     }
+    ReportError(L"sdefss");
 
-    auto it = g_instances.find(cameraFriendlyName);
-    if (it == g_instances.end()) return;
-
-    CameraInstance* instance = it->second;
+    CameraInstance* instance = g_instances[cameraFriendlyName];
     if (!instance) return;
 
     // Señal para detener el hilo
@@ -1910,5 +1906,4 @@ void StopPreview(wchar_t* cameraFriendlyName)
 
     // Eliminar instancia
     delete instance;
-    g_instances.erase(it);
 }

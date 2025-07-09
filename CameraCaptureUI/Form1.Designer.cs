@@ -48,8 +48,6 @@
             this.btnTakePhotoCam1 = new System.Windows.Forms.Button();
             this.comboBoxBitrates = new System.Windows.Forms.ComboBox();
             this.BitRate = new System.Windows.Forms.Label();
-            this.comboBoxVideoFormatsCam2 = new System.Windows.Forms.ComboBox();
-            this.label5 = new System.Windows.Forms.Label();
             this.btnTakePhotoCam2 = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxPreview)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBoxPreview2)).BeginInit();
@@ -60,16 +58,16 @@
             this.comboBoxCameras1.AccessibleDescription = "";
             this.comboBoxCameras1.AccessibleName = "";
             this.comboBoxCameras1.FormattingEnabled = true;
-            this.comboBoxCameras1.Location = new System.Drawing.Point(12, 48);
+            this.comboBoxCameras1.Location = new System.Drawing.Point(16, 48);
             this.comboBoxCameras1.Name = "comboBoxCameras1";
-            this.comboBoxCameras1.Size = new System.Drawing.Size(264, 21);
+            this.comboBoxCameras1.Size = new System.Drawing.Size(263, 21);
             this.comboBoxCameras1.TabIndex = 0;
             this.comboBoxCameras1.SelectedIndexChanged += new System.EventHandler(this.comboBoxCameras1_SelectedIndexChanged);
             // 
             // pictureBoxPreview
             // 
             this.pictureBoxPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pictureBoxPreview.Location = new System.Drawing.Point(15, 203);
+            this.pictureBoxPreview.Location = new System.Drawing.Point(16, 208);
             this.pictureBoxPreview.Name = "pictureBoxPreview";
             this.pictureBoxPreview.Size = new System.Drawing.Size(264, 209);
             this.pictureBoxPreview.TabIndex = 2;
@@ -98,7 +96,7 @@
             // comboBoxMicrophones
             // 
             this.comboBoxMicrophones.FormattingEnabled = true;
-            this.comboBoxMicrophones.Location = new System.Drawing.Point(12, 160);
+            this.comboBoxMicrophones.Location = new System.Drawing.Point(15, 168);
             this.comboBoxMicrophones.Name = "comboBoxMicrophones";
             this.comboBoxMicrophones.Size = new System.Drawing.Size(264, 21);
             this.comboBoxMicrophones.TabIndex = 7;
@@ -115,7 +113,7 @@
             // pictureBoxPreview2
             // 
             this.pictureBoxPreview2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pictureBoxPreview2.Location = new System.Drawing.Point(324, 203);
+            this.pictureBoxPreview2.Location = new System.Drawing.Point(324, 80);
             this.pictureBoxPreview2.Name = "pictureBoxPreview2";
             this.pictureBoxPreview2.Size = new System.Drawing.Size(269, 209);
             this.pictureBoxPreview2.TabIndex = 9;
@@ -124,9 +122,9 @@
             // comboBoxVideoFormatsCam1
             // 
             this.comboBoxVideoFormatsCam1.FormattingEnabled = true;
-            this.comboBoxVideoFormatsCam1.Location = new System.Drawing.Point(12, 108);
+            this.comboBoxVideoFormatsCam1.Location = new System.Drawing.Point(15, 88);
             this.comboBoxVideoFormatsCam1.Name = "comboBoxVideoFormatsCam1";
-            this.comboBoxVideoFormatsCam1.Size = new System.Drawing.Size(264, 21);
+            this.comboBoxVideoFormatsCam1.Size = new System.Drawing.Size(265, 21);
             this.comboBoxVideoFormatsCam1.TabIndex = 10;
             this.comboBoxVideoFormatsCam1.SelectedIndexChanged += new System.EventHandler(this.comboBoxVideoFormatsCam1_SelectedIndexChanged);
             // 
@@ -143,7 +141,7 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(12, 32);
+            this.label1.Location = new System.Drawing.Point(15, 28);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(52, 13);
             this.label1.TabIndex = 14;
@@ -152,7 +150,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(13, 139);
+            this.label2.Location = new System.Drawing.Point(13, 152);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(54, 13);
             this.label2.TabIndex = 15;
@@ -161,7 +159,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(9, 83);
+            this.label3.Location = new System.Drawing.Point(12, 72);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(82, 13);
             this.label3.TabIndex = 16;
@@ -190,7 +188,7 @@
             // 
             this.labelCam2.AutoSize = true;
             this.labelCam2.Font = new System.Drawing.Font("Microsoft Sans Serif", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.labelCam2.Location = new System.Drawing.Point(321, 461);
+            this.labelCam2.Location = new System.Drawing.Point(333, 305);
             this.labelCam2.Name = "labelCam2";
             this.labelCam2.Size = new System.Drawing.Size(73, 18);
             this.labelCam2.TabIndex = 19;
@@ -199,7 +197,7 @@
             // labelStatusCam1
             // 
             this.labelStatusCam1.AutoSize = true;
-            this.labelStatusCam1.Location = new System.Drawing.Point(132, 424);
+            this.labelStatusCam1.Location = new System.Drawing.Point(118, 433);
             this.labelStatusCam1.Name = "labelStatusCam1";
             this.labelStatusCam1.Size = new System.Drawing.Size(0, 13);
             this.labelStatusCam1.TabIndex = 22;
@@ -225,40 +223,23 @@
             // comboBoxBitrates
             // 
             this.comboBoxBitrates.FormattingEnabled = true;
-            this.comboBoxBitrates.Location = new System.Drawing.Point(325, 160);
+            this.comboBoxBitrates.Location = new System.Drawing.Point(15, 128);
             this.comboBoxBitrates.Name = "comboBoxBitrates";
-            this.comboBoxBitrates.Size = new System.Drawing.Size(269, 21);
+            this.comboBoxBitrates.Size = new System.Drawing.Size(265, 21);
             this.comboBoxBitrates.TabIndex = 32;
             // 
             // BitRate
             // 
             this.BitRate.AutoSize = true;
-            this.BitRate.Location = new System.Drawing.Point(321, 139);
+            this.BitRate.Location = new System.Drawing.Point(13, 112);
             this.BitRate.Name = "BitRate";
             this.BitRate.Size = new System.Drawing.Size(42, 13);
             this.BitRate.TabIndex = 33;
             this.BitRate.Text = "BitRate";
             // 
-            // comboBoxVideoFormatsCam2
-            // 
-            this.comboBoxVideoFormatsCam2.FormattingEnabled = true;
-            this.comboBoxVideoFormatsCam2.Location = new System.Drawing.Point(322, 108);
-            this.comboBoxVideoFormatsCam2.Name = "comboBoxVideoFormatsCam2";
-            this.comboBoxVideoFormatsCam2.Size = new System.Drawing.Size(271, 21);
-            this.comboBoxVideoFormatsCam2.TabIndex = 34;
-            // 
-            // label5
-            // 
-            this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(319, 84);
-            this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(82, 13);
-            this.label5.TabIndex = 36;
-            this.label5.Text = "Formatos cam 2";
-            // 
             // btnTakePhotoCam2
             // 
-            this.btnTakePhotoCam2.Location = new System.Drawing.Point(482, 461);
+            this.btnTakePhotoCam2.Location = new System.Drawing.Point(482, 304);
             this.btnTakePhotoCam2.Name = "btnTakePhotoCam2";
             this.btnTakePhotoCam2.Size = new System.Drawing.Size(111, 23);
             this.btnTakePhotoCam2.TabIndex = 37;
@@ -272,8 +253,6 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(805, 499);
             this.Controls.Add(this.btnTakePhotoCam2);
-            this.Controls.Add(this.label5);
-            this.Controls.Add(this.comboBoxVideoFormatsCam2);
             this.Controls.Add(this.BitRate);
             this.Controls.Add(this.comboBoxBitrates);
             this.Controls.Add(this.btnTakePhotoCam1);
@@ -326,8 +305,6 @@
         private System.Windows.Forms.Button btnTakePhotoCam1;
         private System.Windows.Forms.ComboBox comboBoxBitrates;
         private System.Windows.Forms.Label BitRate;
-        private System.Windows.Forms.ComboBox comboBoxVideoFormatsCam2;
-        private System.Windows.Forms.Label label5;
         private System.Windows.Forms.Button btnTakePhotoCam2;
     }
 }
