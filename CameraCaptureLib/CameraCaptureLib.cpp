@@ -355,40 +355,33 @@ bool StopRecorder() {
         hr = g_ctx.sinkWriter->Finalize();
         if (FAILED(hr)) ReportError(L"falló creando el escritor de medios.");
         g_ctx.sinkWriter->Release();
-        g_ctx.sinkWriter = nullptr;
     }
 
     if (g_ctx.videoReader) {
         g_ctx.videoReader->Release();
-        g_ctx.videoReader = nullptr;
     }
 
     if (g_ctx.videoReader2) {
         g_ctx.videoReader2->Release();
-        g_ctx.videoReader2 = nullptr;
     }
 
     if (g_ctx.audioReader) {
         g_ctx.audioReader->Release();
-        g_ctx.audioReader = nullptr;
     }
 
     if (g_ctx.videoSource) {
         g_ctx.videoSource->Shutdown();
         g_ctx.videoSource->Release();
-        g_ctx.videoSource = nullptr;
     }
 
     if (g_ctx.videoSource2) {
         g_ctx.videoSource2->Shutdown();
         g_ctx.videoSource2->Release();
-        g_ctx.videoSource2 = nullptr;
     }
 
     if (g_ctx.audioSource) {
         g_ctx.audioSource->Shutdown();
         g_ctx.audioSource->Release();
-        g_ctx.audioSource = nullptr;
     }
 
     ResetContext();
@@ -404,6 +397,7 @@ void InitializeCameraSystem()
 
 void ShutdownCameraSystem() {
     StopRecorder();
+    ResetContext();
 
     for (auto dev : g_audioDevices) dev->Release();
     g_audioDevices.clear();
@@ -1021,6 +1015,8 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
         return false;
     }
     StopRecorder();
+    ResetContext();
+    BOOL moved;
     HRESULT hr = S_OK;
 
     UINT32 num = 0, den = 0;
@@ -1035,6 +1031,7 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     IMFActivate* pAudioActivate = nullptr;
     
     if (g_ctx.isRecording.load()) return false;
+
     CameraInstance* instance = g_instances[cameraFriendlyName];
     if (!instance || !instance->sourceReader || !instance->mediaSource) return false;
     IMFSourceReader* pReader = instance->sourceReader;
@@ -1190,12 +1187,15 @@ bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const
     g_ctx.recordingStartTime.store(MFGetSystemTime());
 
     // 11. Liberar tipos ya no necesarios
-    if (instance->nativeVideoType) instance->nativeVideoType->Release();
     if (nativeAudioType) nativeAudioType->Release();
     if (outVideoType) outVideoType->Release();
     if (outAudioType) outAudioType->Release();
 
-    MoveFileExW(tempPath, outputPath, MOVEFILE_REPLACE_EXISTING);
+    moved = MoveFileExW(tempPath, outputPath, MOVEFILE_REPLACE_EXISTING);
+    if (!moved) {
+        DeleteFileW(tempPath);
+        ReportError(L"No se pudo mover el archivo temporal al destino final.");
+    }
     return true;
 
 error:
@@ -1229,6 +1229,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
 
     // 0. Limpiar estado anterior y verificar si ya está grabando
     StopRecorder(); // Asegura que los hilos anteriores estén detenidos y los recursos liberados
+    ResetContext();
     // Si StopRecorder() no resetea isRecording, hazlo aquí.
     HRESULT hr = S_OK;
 
@@ -1872,7 +1873,6 @@ void StopPreview(wchar_t* cameraFriendlyName)
         ReportError(L"primero detenga la grabacion.");
         return;
     }
-    ReportError(L"sdefss");
 
     CameraInstance* instance = g_instances[cameraFriendlyName];
     if (!instance) return;

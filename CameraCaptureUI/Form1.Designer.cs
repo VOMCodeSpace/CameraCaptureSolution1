@@ -75,9 +75,9 @@
             // 
             // btnStart
             // 
-            this.btnStart.Location = new System.Drawing.Point(667, 73);
+            this.btnStart.Location = new System.Drawing.Point(324, 414);
             this.btnStart.Name = "btnStart";
-            this.btnStart.Size = new System.Drawing.Size(126, 23);
+            this.btnStart.Size = new System.Drawing.Size(269, 23);
             this.btnStart.TabIndex = 3;
             this.btnStart.Text = "Grabar";
             this.btnStart.UseVisualStyleBackColor = true;
@@ -85,9 +85,9 @@
             // 
             // btnStop
             // 
-            this.btnStop.Location = new System.Drawing.Point(667, 102);
+            this.btnStop.Location = new System.Drawing.Point(324, 449);
             this.btnStop.Name = "btnStop";
-            this.btnStop.Size = new System.Drawing.Size(126, 23);
+            this.btnStop.Size = new System.Drawing.Size(269, 23);
             this.btnStop.TabIndex = 6;
             this.btnStop.Text = "Detener";
             this.btnStop.UseVisualStyleBackColor = true;
@@ -104,7 +104,7 @@
             // comboBoxCameras2
             // 
             this.comboBoxCameras2.FormattingEnabled = true;
-            this.comboBoxCameras2.Location = new System.Drawing.Point(322, 48);
+            this.comboBoxCameras2.Location = new System.Drawing.Point(322, 69);
             this.comboBoxCameras2.Name = "comboBoxCameras2";
             this.comboBoxCameras2.Size = new System.Drawing.Size(271, 21);
             this.comboBoxCameras2.TabIndex = 8;
@@ -113,7 +113,7 @@
             // pictureBoxPreview2
             // 
             this.pictureBoxPreview2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.pictureBoxPreview2.Location = new System.Drawing.Point(324, 80);
+            this.pictureBoxPreview2.Location = new System.Drawing.Point(324, 101);
             this.pictureBoxPreview2.Name = "pictureBoxPreview2";
             this.pictureBoxPreview2.Size = new System.Drawing.Size(269, 209);
             this.pictureBoxPreview2.TabIndex = 9;
@@ -131,12 +131,13 @@
             // checkBoxCamera2
             // 
             this.checkBoxCamera2.AutoSize = true;
-            this.checkBoxCamera2.Location = new System.Drawing.Point(467, 24);
+            this.checkBoxCamera2.Location = new System.Drawing.Point(467, 45);
             this.checkBoxCamera2.Name = "checkBoxCamera2";
             this.checkBoxCamera2.Size = new System.Drawing.Size(146, 17);
             this.checkBoxCamera2.TabIndex = 11;
             this.checkBoxCamera2.Text = "Habilitar segunda camara";
             this.checkBoxCamera2.UseVisualStyleBackColor = true;
+            this.checkBoxCamera2.CheckedChanged += new System.EventHandler(this.checkBoxCamera2_CheckedChanged);
             // 
             // label1
             // 
@@ -168,7 +169,7 @@
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(319, 28);
+            this.label4.Location = new System.Drawing.Point(319, 49);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(52, 13);
             this.label4.TabIndex = 17;
@@ -178,7 +179,7 @@
             // 
             this.labelCam1.AutoSize = true;
             this.labelCam1.Font = new System.Drawing.Font("Microsoft Sans Serif", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.labelCam1.Location = new System.Drawing.Point(13, 464);
+            this.labelCam1.Location = new System.Drawing.Point(15, 420);
             this.labelCam1.Name = "labelCam1";
             this.labelCam1.Size = new System.Drawing.Size(73, 18);
             this.labelCam1.TabIndex = 18;
@@ -188,7 +189,7 @@
             // 
             this.labelCam2.AutoSize = true;
             this.labelCam2.Font = new System.Drawing.Font("Microsoft Sans Serif", 11.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.labelCam2.Location = new System.Drawing.Point(333, 305);
+            this.labelCam2.Location = new System.Drawing.Point(321, 313);
             this.labelCam2.Name = "labelCam2";
             this.labelCam2.Size = new System.Drawing.Size(73, 18);
             this.labelCam2.TabIndex = 19;
@@ -197,22 +198,26 @@
             // labelStatusCam1
             // 
             this.labelStatusCam1.AutoSize = true;
-            this.labelStatusCam1.Location = new System.Drawing.Point(118, 433);
+            this.labelStatusCam1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.labelStatusCam1.Location = new System.Drawing.Point(181, 424);
             this.labelStatusCam1.Name = "labelStatusCam1";
-            this.labelStatusCam1.Size = new System.Drawing.Size(0, 13);
+            this.labelStatusCam1.Size = new System.Drawing.Size(36, 15);
             this.labelStatusCam1.TabIndex = 22;
+            this.labelStatusCam1.Text = "Vacio";
             // 
             // labelStatusCam2
             // 
             this.labelStatusCam2.AutoSize = true;
-            this.labelStatusCam2.Location = new System.Drawing.Point(464, 424);
+            this.labelStatusCam2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.labelStatusCam2.Location = new System.Drawing.Point(518, 317);
             this.labelStatusCam2.Name = "labelStatusCam2";
-            this.labelStatusCam2.Size = new System.Drawing.Size(0, 13);
+            this.labelStatusCam2.Size = new System.Drawing.Size(36, 15);
             this.labelStatusCam2.TabIndex = 23;
+            this.labelStatusCam2.Text = "Vacio";
             // 
             // btnTakePhotoCam1
             // 
-            this.btnTakePhotoCam1.Location = new System.Drawing.Point(173, 461);
+            this.btnTakePhotoCam1.Location = new System.Drawing.Point(18, 449);
             this.btnTakePhotoCam1.Name = "btnTakePhotoCam1";
             this.btnTakePhotoCam1.Size = new System.Drawing.Size(106, 23);
             this.btnTakePhotoCam1.TabIndex = 30;
@@ -239,7 +244,7 @@
             // 
             // btnTakePhotoCam2
             // 
-            this.btnTakePhotoCam2.Location = new System.Drawing.Point(482, 304);
+            this.btnTakePhotoCam2.Location = new System.Drawing.Point(324, 343);
             this.btnTakePhotoCam2.Name = "btnTakePhotoCam2";
             this.btnTakePhotoCam2.Size = new System.Drawing.Size(111, 23);
             this.btnTakePhotoCam2.TabIndex = 37;
@@ -251,7 +256,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(805, 499);
+            this.ClientSize = new System.Drawing.Size(638, 499);
             this.Controls.Add(this.btnTakePhotoCam2);
             this.Controls.Add(this.BitRate);
             this.Controls.Add(this.comboBoxBitrates);
