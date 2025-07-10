@@ -737,7 +737,6 @@ namespace CameraCaptureUI
                     selectedNameCam2 = "";
                     comboBoxCameras2.Text = "Seleccione una opción...";
                     labelStatusCam2.Text = "Vacio";
-
                     RefreshCameraComboBoxes(selectedNameCam1, null);
                 }
             }
