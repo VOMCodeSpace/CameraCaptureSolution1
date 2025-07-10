@@ -1818,8 +1818,12 @@ bool CaptureSnapshott(wchar_t* cameraFriendlyName, wchar_t* outputPath) {
 
     ComPtr<IMFMediaType> pOutputType;
     MFCreateMediaType(&pOutputType);
-    pOutputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    pOutputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    hr = pOutputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    if (FAILED(hr)) return false;
+    hr = pOutputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    if (FAILED(hr)) return false;
+    hr = pOutputType->SetUINT32(MF_MT_AVG_BITRATE, 8000000);
+    if (FAILED(hr)) return false;
     MFSetAttributeSize(pOutputType.Get(), MF_MT_FRAME_SIZE, width, height);
     MFSetAttributeRatio(pOutputType.Get(), MF_MT_FRAME_RATE, 30, 1);
     hr = pTransform->SetOutputType(0, pOutputType.Get(), 0);

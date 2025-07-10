@@ -126,20 +126,29 @@ namespace CameraCaptureUI
             comboBoxBitrates.DataSource = new BindingSource(bitrateOptions, null);
             comboBoxBitrates.SelectedIndex = 0;
         }
+        private List<CameraItem> allCameras = new List<CameraItem>();
 
         private void LoadCameras()
         {
+            comboBoxCameras1.SelectedIndexChanged -= comboBoxCameras1_SelectedIndexChanged;
+            comboBoxCameras2.SelectedIndexChanged -= comboBoxCameras2_SelectedIndexChanged;
+
+            var selectedCam1 = comboBoxCameras1.SelectedItem as CameraItem;
+            var selectedCam2 = comboBoxCameras2.SelectedItem as CameraItem;
+
             comboBoxCameras1.Items.Clear();
-            comboBoxCameras1.Text = "Seleccione una opción...";
             comboBoxCameras2.Items.Clear();
+
+            comboBoxCameras1.Text = "Seleccione una opción...";
             comboBoxCameras2.Text = "Seleccione una opción...";
-            if(!previewCam1)
+
+            if (!previewCam1)
             {
                 comboBoxVideoFormatsCam1.Items.Clear();
                 comboBoxVideoFormatsCam1.Text = "Seleccione una opción...";
             }
 
-
+            allCameras.Clear();
             int count = CameraInterop.GetCameraCount();
             if (count > 0)
             {
@@ -148,21 +157,72 @@ namespace CameraCaptureUI
                     char[] buffer = new char[256];
                     CameraInterop.GetCameraName(i, buffer, buffer.Length);
                     string name = new string(buffer).TrimEnd('\0');
-                    if (name != "")
+                    if (!string.IsNullOrEmpty(name))
                     {
-                        comboBoxCameras1.Items.Add(new CameraItem { Name = name, Index = i });
-                        comboBoxCameras2.Items.Add(new CameraItem { Name = name, Index = i });
+                        allCameras.Add(new CameraItem { Name = name, Index = i });
                     }
                 }
             }
-   
 
-            // Maneja el evento CheckedChanged del CheckBox
+            RefreshCameraComboBoxes(selectedCam1?.Name, selectedCam2?.Name);
+
+            checkBoxCamera2.CheckedChanged -= checkBox1_CheckedChanged;
             checkBoxCamera2.CheckedChanged += checkBox1_CheckedChanged;
-            //if (comboBoxCameras.Items.Count > 0) comboBoxCameras.SelectedIndex = 0;
-            //if (comboBoxCameras2.Items.Count > 1) comboBoxCameras2.SelectedIndex = 1;
-            //else if (comboBoxCameras2.Items.Count > 0) comboBoxCameras2.SelectedIndex = 0;
+
+            comboBoxCameras1.SelectedIndexChanged += comboBoxCameras1_SelectedIndexChanged;
+            comboBoxCameras2.SelectedIndexChanged += comboBoxCameras2_SelectedIndexChanged;
         }
+        private bool isUpdatingComboBoxes = false;
+        private void RefreshCameraComboBoxes(string selectedCam1Name, string selectedCam2Name)
+        {
+            if (isUpdatingComboBoxes) return;
+            isUpdatingComboBoxes = true;
+
+            comboBoxCameras1.SelectedIndexChanged -= comboBoxCameras1_SelectedIndexChanged;
+            comboBoxCameras2.SelectedIndexChanged -= comboBoxCameras2_SelectedIndexChanged;
+
+            comboBoxCameras1.Items.Clear();
+            comboBoxCameras2.Items.Clear();
+
+            foreach (var cam in allCameras)
+            {
+                if (cam.Name != selectedCam2Name)
+                    comboBoxCameras1.Items.Add(cam);
+                if (cam.Name != selectedCam1Name)
+                    comboBoxCameras2.Items.Add(cam);
+            }
+
+            if (!string.IsNullOrEmpty(selectedCam1Name))
+            {
+                foreach (CameraItem item in comboBoxCameras1.Items)
+                {
+                    if (item.Name == selectedCam1Name)
+                    {
+                        comboBoxCameras1.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(selectedCam2Name))
+            {
+                foreach (CameraItem item in comboBoxCameras2.Items)
+                {
+                    if (item.Name == selectedCam2Name)
+                    {
+                        comboBoxCameras2.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+
+            comboBoxCameras1.SelectedIndexChanged += comboBoxCameras1_SelectedIndexChanged;
+            comboBoxCameras2.SelectedIndexChanged += comboBoxCameras2_SelectedIndexChanged;
+
+            isUpdatingComboBoxes = false;
+        }
+
+
 
         private void LoadMicrophones()
         {
@@ -524,15 +584,19 @@ namespace CameraCaptureUI
 
         private void comboBoxCameras1_SelectedIndexChanged(object sender, EventArgs e)
         {
+            if (isUpdatingComboBoxes) return;
             if (comboBoxCameras1.SelectedItem is CameraItem selected1)
             {
-                if (selectedNameCam2 != selected1.Name)
+                if (selected1.Name != selectedNameCam1)
                 {
-                    try
+                    if (selected1.Name != selectedNameCam2)
                     {
-                        LoadCameraFormats(selected1.Name, 1);
-                        if (comboBoxCameras1.SelectedItem is CameraItem selected)
+                        // Actualiza ComboBox2 antes de cualquier otra lógica
+                        RefreshCameraComboBoxes(selected1.Name, selectedNameCam2);
+
+                        try
                         {
+                            LoadCameraFormats(selected1.Name, 1);
                             btnStart.Enabled = true;
                             btnTakePhotoCam1.Enabled = true;
                             pictureBoxPreview.Image = null;
@@ -540,28 +604,31 @@ namespace CameraCaptureUI
 
                             stopPreview(selectedNameCam1);
                             IntPtr hwnd1 = pictureBoxPreview.Handle;
-                            if (CameraInterop.StartPreview(selected.Name, 0, hwnd1))
+
+                            if (CameraInterop.StartPreview(selected1.Name, 0, hwnd1))
                             {
                                 previewCam1 = true;
                                 btnStart.Enabled = true;
                                 comboBoxMicrophones.Enabled = true;
                                 comboBoxBitrates.Enabled = true;
-                                selectedNameCam1 = selected.Name;
+                                selectedNameCam1 = selected1.Name;
                                 labelStatusCam1.Text = "Cam1 Preview";
                             }
-
                         }
-                    } 
-                    catch
-                    {
-                        MessageBox.Show("No se pudo cargar los formatos disponibles");
+                        catch
+                        {
+                            MessageBox.Show("No se pudo cargar los formatos disponibles");
+                        }
                     }
-                    
-                }
-                else
-                {
-                    MessageBox.Show("En camara 1 seleccione una camara diferente a la camara 2");
-                    comboBoxCameras1.SelectedIndex = -1;
+                    else
+                    {
+                        MessageBox.Show("En camara 1 seleccione una camara diferente a la camara 2");
+
+                        // ⛔ Esto puede disparar el evento de nuevo con null
+                        comboBoxCameras1.SelectedIndexChanged -= comboBoxCameras1_SelectedIndexChanged;
+                        comboBoxCameras1.SelectedIndex = -1;
+                        comboBoxCameras1.SelectedIndexChanged += comboBoxCameras1_SelectedIndexChanged;
+                    }
                 }
             }
             else
@@ -570,38 +637,50 @@ namespace CameraCaptureUI
             }
         }
 
+
         private void comboBoxCameras2_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (checkBoxCamera2.Checked)
+            if (!checkBoxCamera2.Checked) return;
+            if (isUpdatingComboBoxes) return;
+            if (comboBoxCameras2.SelectedItem is CameraItem selected2)
             {
-                if (comboBoxCameras2.SelectedItem is CameraItem selected2)
+                if (selected2.Name != selectedNameCam1)
                 {
-                    if (selectedNameCam1 != selected2.Name)
+                    if (selected2.Name != selectedNameCam2)
                     {
+                        // Actualiza ComboBox1 para que no incluya esta selección
+                        RefreshCameraComboBoxes(selectedNameCam1, selected2.Name);
+
                         pictureBoxPreview2.Image = null;
                         pictureBoxPreview2.Invalidate();
                         stopPreview(selectedNameCam2);
                         IntPtr hwnd2 = pictureBoxPreview2.Handle;
+
                         if (CameraInterop.StartPreview(selected2.Name, 0, hwnd2))
                         {
                             previewCam2 = true;
                             selectedNameCam2 = selected2.Name;
                             btnTakePhotoCam2.Enabled = true;
-                            labelStatusCam1.Text = "Cam2 Preview";
+                            labelStatusCam2.Text = "Cam2 Preview";
                         }
                     }
-                    else
-                    {
-                        comboBoxCameras2.SelectedIndex = -1;
-                        MessageBox.Show("En camara 2 seleccione una camara diferente a la camara 1");
-                    }
-                }
+                } 
                 else
                 {
-                    MessageBox.Show("Seleccione Camara 2 del desplegable");
+                    MessageBox.Show("En cámara 2 seleccione una cámara diferente a la cámara 1");
+
+                    // Cancelar la selección (sin volver a disparar el evento recursivamente)
+                    comboBoxCameras2.SelectedIndexChanged -= comboBoxCameras2_SelectedIndexChanged;
+                    comboBoxCameras2.SelectedIndex = -1;
+                    comboBoxCameras2.SelectedIndexChanged += comboBoxCameras2_SelectedIndexChanged;
                 }
             }
+            else
+            {
+                MessageBox.Show("Seleccione Camara 2 del desplegable");
+            }
         }
+
 
         protected override void WndProc(ref Message m)
         {
@@ -649,14 +728,31 @@ namespace CameraCaptureUI
 
         private void checkBoxCamera2_CheckedChanged(object sender, EventArgs e)
         {
-            if (comboBoxCameras2.SelectedItem is CameraItem selected2)
+            if (!checkBoxCamera2.Checked)
             {
-                stopPreview(selectedNameCam2);
-                btnTakePhotoCam2.Enabled = false;
-                selectedNameCam2 = "";
+                if (comboBoxCameras2.SelectedItem is CameraItem selected2)
+                {
+                    stopPreview(selectedNameCam2);
+                    btnTakePhotoCam2.Enabled = false;
+                    selectedNameCam2 = "";
+                    comboBoxCameras2.Text = "Seleccione una opción...";
+                    labelStatusCam2.Text = "Vacio";
+
+                    RefreshCameraComboBoxes(selectedNameCam1, null);
+                }
             }
+            comboBoxCameras2.Enabled = checkBoxCamera2.Checked;
         }
+
     }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct DEV_BROADCAST_HDR
+{
+    public int dbch_size;
+    public int dbch_devicetype;
+    public int dbch_reserved;
 }
 public struct CameraList
 {

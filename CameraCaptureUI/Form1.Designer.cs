@@ -58,7 +58,7 @@
             this.comboBoxCameras1.AccessibleDescription = "";
             this.comboBoxCameras1.AccessibleName = "";
             this.comboBoxCameras1.FormattingEnabled = true;
-            this.comboBoxCameras1.Location = new System.Drawing.Point(16, 48);
+            this.comboBoxCameras1.Location = new System.Drawing.Point(16, 44);
             this.comboBoxCameras1.Name = "comboBoxCameras1";
             this.comboBoxCameras1.Size = new System.Drawing.Size(263, 21);
             this.comboBoxCameras1.TabIndex = 0;
