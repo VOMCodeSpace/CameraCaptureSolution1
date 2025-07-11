@@ -131,6 +131,10 @@ struct CameraInstance {
     IMFSourceReader* sourceReader = nullptr;
     IMFMediaType* nativeVideoType = nullptr;
     GUID videoSubtype = GUID_NULL;
+    IMFMediaSource* mediaSourceRecording = nullptr;
+    IMFSourceReader* sourceReaderRecording = nullptr;
+    IMFMediaType* nativeVideoTypeRecording = nullptr;
+    GUID videoSubtypeRecording = GUID_NULL;
     std::thread previewThread;
     HWND previewHwnd = nullptr;
     bool stopPreview = false;
@@ -586,15 +590,18 @@ int FindClosestCompatibleVideoFormat(IMFSourceReader* reader, int preferredIndex
 
 bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
     IMFAttributes* pAttributes = nullptr;
-    IMFActivate** ppDevices = nullptr;
-    UINT32 count = 0;
+    IMFActivate** ppDevicesA = nullptr;
+    IMFActivate** ppDevicesB = nullptr;
+    UINT32 countA = 0, countB = 0;
 
     HRESULT hr;
 
     if (FAILED(MFCreateAttributes(&pAttributes, 1))) return false;
     pAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, TRUE);
     pAttributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
-    if (FAILED(MFEnumDeviceSources(pAttributes, &ppDevices, &count))) {
+
+    if (FAILED(MFEnumDeviceSources(pAttributes, &ppDevicesA, &countA)) ||
+        FAILED(MFEnumDeviceSources(pAttributes, &ppDevicesB, &countB))) {
         pAttributes->Release();
         return false;
     }
@@ -602,32 +609,44 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
     CameraInstance* instance = new CameraInstance();
     bool found = false;
 
-    for (UINT32 i = 0; i < count; i++) {
-        WCHAR* name = nullptr;
-        UINT32 len = 0;
-        if (SUCCEEDED(ppDevices[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &len))) {
-            if (wcscmp(name, cameraName) == 0) {
-                if (SUCCEEDED(ppDevices[i]->ActivateObject(IID_PPV_ARGS(&instance->mediaSource)))) {
-                    found = true;
+    for (UINT32 i = 0; i < countA; i++) {
+        WCHAR* nameA = nullptr;
+        if (SUCCEEDED(ppDevicesA[i]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &nameA, nullptr))) {
+            for (UINT32 j = 0; j < countB; j++) {
+                WCHAR* nameB = nullptr;
+                if (SUCCEEDED(ppDevicesB[j]->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &nameB, nullptr))) {
+                    if (wcscmp(nameA, nameB) == 0 && wcscmp(nameA, cameraName) == 0) {
+                        if (SUCCEEDED(ppDevicesA[i]->ActivateObject(IID_PPV_ARGS(&instance->mediaSource))) &&
+                            SUCCEEDED(ppDevicesB[j]->ActivateObject(IID_PPV_ARGS(&instance->mediaSourceRecording)))) {
+                            found = true;
+                        }
+                        CoTaskMemFree(nameA);
+                        CoTaskMemFree(nameB);
+                        goto done;
+                    }
+                    CoTaskMemFree(nameB);
                 }
-                CoTaskMemFree(name);
-                break;
             }
-            CoTaskMemFree(name);
+            CoTaskMemFree(nameA);
         }
     }
 
-    for (UINT32 i = 0; i < count; i++) ppDevices[i]->Release();
-    CoTaskMemFree(ppDevices);
+done:
+    for (UINT32 i = 0; i < countA; i++) ppDevicesA[i]->Release();
+    for (UINT32 i = 0; i < countB; i++) ppDevicesB[i]->Release();
+    CoTaskMemFree(ppDevicesA);
+    CoTaskMemFree(ppDevicesB);
     pAttributes->Release();
 
-    if (!found || !instance->mediaSource) {
+    if (!found || !instance->mediaSource || !instance->mediaSourceRecording) {
         delete instance;
         return false;
     }
 
-    if (FAILED(MFCreateSourceReaderFromMediaSource(instance->mediaSource, nullptr, &instance->sourceReader))) {
+    if (FAILED(MFCreateSourceReaderFromMediaSource(instance->mediaSource, nullptr, &instance->sourceReader)) ||
+        FAILED(MFCreateSourceReaderFromMediaSource(instance->mediaSourceRecording, nullptr, &instance->sourceReaderRecording))) {
         instance->mediaSource->Release();
+        instance->mediaSourceRecording->Release();
         delete instance;
         return false;
     }
@@ -635,43 +654,27 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
     IMFMediaType* selectedType = nullptr;
     GUID subtype = GUID_NULL;
 
-    
     int selectedIndex = FindClosestCompatibleVideoFormat(instance->sourceReader, indexCam, &instance->nativeVideoType, nullptr);
-    if (selectedIndex < 0) {
-        return false;
-    }
-    IMFMediaType* pType = instance->nativeVideoType;
+    if (selectedIndex < 0) return false;
 
+    IMFMediaType* pType = instance->nativeVideoType;
     UINT32 width = 0, height = 0;
     hr = MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &width, &height);
-    if (FAILED(hr)) {
-        pType->Release();
-        return false;
-    }
+    if (FAILED(hr)) { pType->Release(); return false; }
 
     hr = pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-    if (FAILED(hr)) {
-        pType->Release();
-        return false;
-    }
+    if (FAILED(hr)) { pType->Release(); return false; }
 
     if (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_YUY2) {
-        selectedType = pType;  // Se usará más tarde y se liberará más adelante
+        selectedType = pType;
     }
     else {
-        ReportError(L"Formato no soportado");
-        pType->Release();  // No es un formato soportado, liberamos de inmediato
-    }
-
-    if (!selectedType) {
-        instance->sourceReader->Release();
-        instance->mediaSource->Release();
-        delete instance;
+        pType->Release();
         return false;
     }
 
     instance->sourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, selectedType);
-    instance->videoSubtype = subtype;  // Guardamos el tipo para uso posterior
+    instance->videoSubtype = subtype;
     selectedType->Release();
 
     instance->previewHwnd = hwndPreview;
@@ -699,17 +702,10 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
                     DWORD maxLen = 0, curLen = 0;
 
                     if (SUCCEEDED(buffer->Lock(&data, &maxLen, &curLen))) {
-                        // Convertir según el tipo de video
-                        if (instance->videoSubtype == MFVideoFormat_NV12) {
+                        if (instance->videoSubtype == MFVideoFormat_NV12)
                             ConvertNV12ToRGB32(data, rgbBuffer, width, height);
-                        }
-                        else if (instance->videoSubtype == MFVideoFormat_YUY2) {
+                        else if (instance->videoSubtype == MFVideoFormat_YUY2)
                             ConvertYUY2ToRGB32(data, rgbBuffer, width, height);
-                        }
-                        else {
-                            ReportError(L"Formato no soportado");
-                            return;
-                        }
 
                         BitmapData bmpData;
                         if (bitmap.LockBits(&rect, ImageLockModeWrite, PixelFormat32bppRGB, &bmpData) == Ok) {
@@ -720,7 +716,6 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
                             GetClientRect(instance->previewHwnd, &rc);
                             int wndWidth = rc.right - rc.left;
                             int wndHeight = rc.bottom - rc.top;
-
                             graphics.DrawImage(&bitmap, 0, 0, wndWidth, wndHeight);
                         }
 
@@ -742,6 +737,7 @@ bool StartPreview(wchar_t* cameraName, int indexCam, HWND hwndPreview) {
     g_instances[cameraName] = instance;
     return true;
 }
+
 
 
 
@@ -1215,37 +1211,156 @@ error:
     return false;
 }
 
+bool FindCompatibleCommonFormat(
+    IMFSourceReader* reader1,
+    IMFSourceReader* reader2,
+    ComPtr<IMFMediaType>& outMediaType,
+    UINT32& outWidth,
+    UINT32& outHeight,
+    UINT32& outFpsNum,
+    UINT32& outFpsDen,
+    GUID& outSubtype
+) {
+    struct Format {
+        UINT32 w, h, fpsNum, fpsDen;
+        GUID subtype;
+        DWORD index;
+    };
+
+    std::vector<Format> formats1, formats2;
+
+    auto CollectFormats = [](IMFSourceReader* reader, std::vector<Format>& list) {
+        for (DWORD i = 0; ; ++i) {
+            ComPtr<IMFMediaType> type;
+            if (FAILED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &type)))
+                break;
+
+            GUID subtype = GUID_NULL;
+            UINT32 w = 0, h = 0, fpsNum = 0, fpsDen = 0;
+
+            if (SUCCEEDED(type->GetGUID(MF_MT_SUBTYPE, &subtype)) &&
+                SUCCEEDED(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &w, &h)) &&
+                SUCCEEDED(MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &fpsNum, &fpsDen))) {
+
+                if ((subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_YUY2) &&
+                    w == 640 && h == 480 &&
+                    (fpsNum == 30 && fpsDen == 1)) {
+
+                    list.push_back({ w, h, fpsNum, fpsDen, subtype, i });
+                }
+            }
+        }
+        };
+
+    CollectFormats(reader1, formats1);
+    CollectFormats(reader2, formats2);
+
+    for (const auto& f1 : formats1) {
+        for (const auto& f2 : formats2) {
+            if (f1.subtype == f2.subtype) {
+                // Coincidencia exacta en resolución, fps y subtipo
+                ComPtr<IMFMediaType> nativeType;
+                HRESULT hr = reader1->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, f1.index, &nativeType);
+                if (FAILED(hr)) continue;
+
+                ComPtr<IMFMediaType> clonedType;
+                hr = MFCreateMediaType(&clonedType);
+                if (FAILED(hr)) continue;
+
+                hr = nativeType->CopyAllItems(clonedType.Get());
+                if (FAILED(hr)) continue;
+
+                outMediaType = clonedType;
+                outWidth = f1.w;
+                outHeight = f1.h;
+                outFpsNum = f1.fpsNum;
+                outFpsDen = f1.fpsDen;
+                outSubtype = f1.subtype;
+                return true;
+            }
+        }
+    }
+
+    ReportError(L"No se encontró 640x480 a 30 fps con el mismo formato entre ambas cámaras.");
+    return false;
+}
+
+void PrintMediaTypeInfo(IMFMediaType* mediaType, const wchar_t* label = L"MediaType") {
+    if (!mediaType) {
+        ReportError(L"MediaType es nulo");
+        return;
+    }
+
+    UINT32 width = 0, height = 0;
+    UINT32 fpsNum = 0, fpsDen = 0;
+    GUID subtype = GUID_NULL;
+
+    HRESULT hr = S_OK;
+
+    hr = MFGetAttributeSize(mediaType, MF_MT_FRAME_SIZE, &width, &height);
+    if (FAILED(hr)) {
+        ReportError(L"Error al obtener resolución.");
+    }
+
+    hr = MFGetAttributeRatio(mediaType, MF_MT_FRAME_RATE, &fpsNum, &fpsDen);
+    if (FAILED(hr)) {
+        ReportError(L"Error al obtener framerate.");
+    }
+
+    hr = mediaType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (FAILED(hr)) {
+        ReportError(L"Error al obtener subtype.");
+    }
+
+    const wchar_t* formatName = L"Desconocido";
+    if (subtype == MFVideoFormat_NV12) formatName = L"NV12";
+    else if (subtype == MFVideoFormat_YUY2) formatName = L"YUY2";
+    else if (subtype == MFVideoFormat_MJPG) formatName = L"MJPEG";
+    else if (subtype == MFVideoFormat_RGB32) formatName = L"RGB32";
+
+    wchar_t msg[200];
+    swprintf(msg, 200, L"%s: %ux%u @ %u/%u fps - Formato: %s", label, width, height, fpsNum, fpsDen, formatName);
+    ReportError(msg);
+}
+
+
+
 bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate) {
     if (g_ctx.isRecording) {
         ReportError(L"Error: La grabación ya está en curso.");
         return false;
     }
-
+    ReportError(L"1");
     g_ctx.baseTime.store(-1);
     g_ctx.totalPausedDuration = 0;
     g_ctx.pauseStartTime = 0;
     g_ctx.isPaused = false;
-    g_ctx.isRecording = true;
 
     // 0. Limpiar estado anterior y verificar si ya está grabando
     StopRecorder(); // Asegura que los hilos anteriores estén detenidos y los recursos liberados
     ResetContext();
+    ReportError(L"2");
     // Si StopRecorder() no resetea isRecording, hazlo aquí.
     HRESULT hr = S_OK;
 
+    ComPtr<IMFMediaType> commonMediaType;
     // --- Parámetros de Video de Salida Compuesto ---
     // Ajusta estos valores a la resolución y FPS que quieres para el archivo final.
-    UINT32 finalOutputWidth = 1280; // Ancho total del video compuesto (ej: 2 cámaras una al lado de la otra)
-    UINT32 finalOutputHeight = (cameraFriendlyName && cameraFriendlyName2) ? (720 * 2) : 720; // Alto total del video compuesto
-    UINT32 finalOutputFpsNum = 30; // Numerador de FPS del video compuesto
-    UINT32 finalOutputFpsDen = 1;  // Denominador de FPS del video compuesto (ej: 30/1 = 30 FPS)
+    UINT32 finalOutputWidth; // Ancho total del video compuesto (ej: 2 cámaras una al lado de la otra)
+    UINT32 finalOutputHeight;
+    UINT32 finalOutputFpsNum;
+    UINT32 finalOutputFpsDen;  // Denominador de FPS del video compuesto (ej: 30/1 = 30 FPS)
 
+    UINT32 w = 0, h = 0, fpsNum = 0, fpsDen = 0;
+    GUID subtype = GUID_NULL;
+    GUID subtype2 = GUID_NULL;
+    ComPtr<IMFMediaType> mediaType;
 
     // --- Parámetros de Video de Entrada de CADA Cámara ---
     // Esta es la resolución y FPS que pedirás a cada cámara individualmente.
     // Si cam2Index >= 0, las cámaras se apilan verticalmente, por lo que cada una aporta la mitad de la altura.
-    UINT32 singleCamInputWidth = 1280;
-    UINT32 singleCamInputHeight = finalOutputHeight / 2;
+    UINT32 singleCamInputWidth;
+    UINT32 singleCamInputHeight;
 
     // --- Punteros COM (Inicialización a nullptr para limpieza segura) ---
     // Usaremos SAFE_RELEASE en el 'error' block.
@@ -1257,31 +1372,138 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     IMFActivate* pVideoActivate2 = nullptr;
     IMFMediaType* sinkInputVideoType = nullptr;
     IMFMediaType* nativeVideoType = nullptr;
-    IMFMediaType * nativeAudioType = nullptr;
+    IMFMediaType* nativeAudioType = nullptr;
+    UINT32 width = 0, height = 0;
+    UINT32 width2 = 0, height2 = 0;
+    UINT32 fpsNum1 = 0, fpsDen1 = 0;
+    UINT32 fpsNum2 = 0, fpsDen2 = 0;
 
     CameraInstance* instance = g_instances[cameraFriendlyName];
-    if (!instance || !instance->sourceReader || !instance->mediaSource)
+    if (!instance || !instance->sourceReaderRecording || !instance->mediaSourceRecording)
         return false;
+    ReportError(L"3");
+    IMFSourceReader* pReader = instance->sourceReaderRecording;
 
-    IMFSourceReader* pReader = instance->sourceReader;
-
-    if (!instance->mediaSource)
+    if (!instance->mediaSourceRecording)
     {
         ReportError(L"Error: instancia de la camara 1 no existe");
         return false;
     }
+    ReportError(L"4");
 
     CameraInstance* instance2 = g_instances[cameraFriendlyName2];
-    if (!instance2 || !instance2->sourceReader || !instance2->mediaSource)
+    if (!instance2 || !instance2->sourceReaderRecording || !instance2->mediaSourceRecording)
         return false;
 
-    IMFSourceReader* pReader2 = instance2->sourceReader;
+    IMFSourceReader* pReader2 = instance2->sourceReaderRecording;
 
-    if (!instance2->mediaSource)
+    if (!instance2->mediaSourceRecording)
     {
         ReportError(L"Error: instancia de la camara 2 no existe");
         return false;
     }
+    ReportError(L"5");
+    // Obtener activador de audio (si micIndex es válido)
+    if (micFriendlyName) { // Asumo que micIndex < 0 significa no grabar audio
+        hr = GetAudioDeviceActivate(micFriendlyName, &pAudioActivate); CHECK_HR(hr, "GetAudioDeviceActivate");
+        hr = pAudioActivate->ActivateObject(IID_PPV_ARGS(&g_ctx.audioSource)); CHECK_HR(hr, "ActivateObject (Audio)");
+    }
+    else {
+        g_ctx.audioSource = nullptr; // Asegurarse de que sea nulo si no se usa
+        g_ctx.audioReader = nullptr; // Asegurarse de que sea nulo si no se usa
+    }
+    ReportError(L"6");
+    if (g_ctx.audioSource) { // Solo si hay fuente de audio
+        hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Audio)");
+    }
+
+    // 4. Obtener tipo nativo audio
+    hr = g_ctx.audioReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeAudioType);
+    if (FAILED(hr)) goto error;
+    hr = g_ctx.audioReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, nativeAudioType);
+    if (FAILED(hr)) goto error;
+    ReportError(L"7");
+    if (!FindCompatibleCommonFormat(pReader, pReader2, commonMediaType, w, h, fpsNum, fpsDen, subtype)) {
+        ReportError(L"No se encontró un formato común entre las cámaras.");
+        goto error;
+    }
+
+    finalOutputWidth = w;
+    finalOutputHeight = h * 2;
+    singleCamInputWidth = w;
+    singleCamInputHeight = h;
+    finalOutputFpsNum = fpsNum;
+    finalOutputFpsDen = fpsDen;
+    PrintMediaTypeInfo(commonMediaType.Get(), L"Formato común seleccionado");
+
+    /*instance->sourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, commonMediaType.Get());
+    instance2->sourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, commonMediaType.Get());*/
+
+
+    /*pReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &instance->nativeVideoType);
+    pReader2->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &instance2->nativeVideoType);*/
+    hr = instance->nativeVideoTypeRecording->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (FAILED(hr)) {
+        ReportError(L"No se pudo obtener el subtipo (formato) del tipo nativo");
+        return false;
+    }
+
+    hr = instance->nativeVideoTypeRecording->GetGUID(MF_MT_SUBTYPE, &subtype2);
+    if (FAILED(hr)) {
+        ReportError(L"No se pudo obtener el subtipo (formato) del tipo nativo");
+        return false;
+    }
+
+
+
+    hr = MFGetAttributeSize(instance->nativeVideoTypeRecording, MF_MT_FRAME_SIZE, &width, &height);
+    if (FAILED(hr)) {
+        ReportError(L"Fallo al obtener tamaño de frame");
+        return false;
+    }
+
+    hr = MFGetAttributeRatio(instance->nativeVideoTypeRecording, MF_MT_FRAME_RATE, &fpsNum1, &fpsDen1);
+    if (FAILED(hr)) {
+        ReportError(L"Fallo al obtener FPS del tipo de video");
+        return false;
+    }
+
+    wchar_t msg[128];
+    swprintf(msg, 128, L"Resolución: %ux%u - FPS: %u/%u", width, height, fpsNum1, fpsDen1);
+    ReportError(msg);
+
+
+
+
+    hr = MFGetAttributeSize(instance->nativeVideoTypeRecording, MF_MT_FRAME_SIZE, &width, &height);
+    if (FAILED(hr)) {
+        ReportError(L"Fallo al obtener tamaño de frame");
+        return false;
+    }
+
+    ReportError(L"dsj2");
+    hr = MFGetAttributeRatio(instance2->nativeVideoTypeRecording, MF_MT_FRAME_RATE, &fpsNum2, &fpsDen2);
+    if (FAILED(hr)) {
+        ReportError(L"Fallo al obtener FPS del tipo de video");
+        return false;
+    }
+
+
+    wchar_t msg2[128];
+    swprintf(msg2, 128, L"Resolución: %ux%u - FPS: %u/%u", width, height, fpsNum2, fpsDen2);
+    ReportError(msg2);
+
+    ReportError(L"92");
+
+    ReportError(L"8");
+    hr = pReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, commonMediaType.Get());
+    CHECK_HR(hr, "SetCurrentMediaType cámara 1");
+
+    ReportError(L"91");
+    hr = pReader2->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, commonMediaType.Get());
+    CHECK_HR(hr, "SetCurrentMediaType cámara 2");
+
+    ReportError(L"9w");
 
     // Obtener activador de audio (si micIndex es válido)
     if (micFriendlyName) { // Asumo que micIndex < 0 significa no grabar audio
@@ -1296,7 +1518,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     if (g_ctx.audioSource) { // Solo si hay fuente de audio
         hr = MFCreateSourceReaderFromMediaSource(g_ctx.audioSource, nullptr, &g_ctx.audioReader); CHECK_HR(hr, "MFCreateSourceReaderFromMediaSource (Audio)");
     }
-
+    ReportError(L"9x");
     // 4. Obtener tipo nativo audio
     hr = g_ctx.audioReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeAudioType);
     if (FAILED(hr)) goto error;
@@ -1304,7 +1526,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     if (FAILED(hr)) goto error;
 
     // 3. Configurar tipos de entrada de video para ambas cámaras (usando SetPreferredMediaType)
-    hr = SetPreferredMediaType(pReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
+    /*hr = SetPreferredMediaType(pReader, singleCamInputWidth, singleCamInputHeight, finalOutputFpsNum, finalOutputFpsDen);
     if (!hr) { 
         ReportError(L"Fallo SetPreferredMediaType en camara 1"); 
         return false;
@@ -1314,8 +1536,8 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     if (!hr) {
         ReportError(L"Fallo SetPreferredMediaType en camara 2");
         return false;
-    }
-
+    }*/
+    ReportError(L"9p");
     // 4. Configurar el SourceReader de audio
     if (g_ctx.audioReader) {
         // En audio, a menudo es mejor usar el tipo nativo directo si es compatible con el SinkWriter.
@@ -1369,7 +1591,14 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     // 7. Configurar tipo de entrada del SinkWriter para el stream de video (NV12)
     hr = MFCreateMediaType(&sinkInputVideoType); CHECK_HR(hr, "MFCreateMediaType for sinkInputVideoType");
     hr = sinkInputVideoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); CHECK_HR(hr, "SetGUID MF_MT_MAJOR_TYPE (SinkInput)");
-    hr = sinkInputVideoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12); CHECK_HR(hr, "SetGUID MF_MT_SUBTYPE (SinkInput NV12)");
+    if (subtype == subtype2)
+    {
+        hr = sinkInputVideoType->SetGUID(MF_MT_SUBTYPE, subtype); CHECK_HR(hr, "SetGUID MF_MT_SUBTYPE (SinkInput NV12)");
+    }
+    else
+    {
+        goto error;
+    }
     hr = MFSetAttributeSize(sinkInputVideoType, MF_MT_FRAME_SIZE, finalOutputWidth, finalOutputHeight); CHECK_HR(hr, "MFSetAttributeSize (SinkInput Resolution)");
     hr = MFSetAttributeRatio(sinkInputVideoType, MF_MT_FRAME_RATE, finalOutputFpsNum, finalOutputFpsDen); CHECK_HR(hr, "MFSetAttributeRatio (SinkInput FPS)");
     hr = MFSetAttributeRatio(sinkInputVideoType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1); CHECK_HR(hr, "MFSetAttributeRatio (SinkInput PAR)");
@@ -1556,7 +1785,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
                 }
-            });
+        });
     }
     // 11. Hilo de audio
     if (g_ctx.audioReader) { // Solo si hay un lector de audio
