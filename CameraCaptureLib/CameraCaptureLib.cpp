@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "CameraInterface.h"
 
+#include <mferror.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -143,6 +144,17 @@ extern "C" __declspec(dllexport) void __stdcall SetErrorCallback(ErrorCallbackFu
     g_errorCallback = callback;
 }
 
+#ifndef MF_E_HW_DISCONNECTED
+#define MF_E_HW_DISCONNECTED          ((HRESULT)0xC00D3E84L)
+#endif
+
+#ifndef MF_E_DEVICE_INVALIDATED
+#define MF_E_DEVICE_INVALIDATED       ((HRESULT)0xC00D36B0L)
+#endif
+
+#ifndef MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED
+#define MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED ((HRESULT)0xC00D370FL)
+#endif
 
 // --- Prototipos internos ---
 bool InitializeRecorder(int videoIndex, int audioIndex, const wchar_t* outputPath);
@@ -1279,14 +1291,19 @@ void FindCompatibleCommonFormat(wchar_t* selectedNameCam1, wchar_t* selectedName
         }
     }
 
-    // 2. Buscar el primer formato compatible entre las dos cámaras
+    // 2. Buscar el primer formato compatible entre las dos cámaras con FPS > 20
     for (const auto& f1 : formats1) {
         for (const auto& f2 : formats2) {
+            float fps1 = (float)f1.fpsNum / f1.fpsDen;
+            float fps2 = (float)f2.fpsNum / f2.fpsDen;
+
             if (f1.w == f2.w &&
                 f1.h == f2.h &&
                 f1.subtype == f2.subtype &&
                 abs((int)f1.fpsNum - (int)f2.fpsNum) <= 5 &&
-                f1.fpsDen == f2.fpsDen) {
+                f1.fpsDen == f2.fpsDen &&
+                fps1 > 20.0f &&
+                fps2 > 20.0f) {
 
                 indicesOut[0] = static_cast<int>(f1.index);
                 indicesOut[1] = static_cast<int>(f2.index);
@@ -1296,8 +1313,9 @@ void FindCompatibleCommonFormat(wchar_t* selectedNameCam1, wchar_t* selectedName
         }
     }
 
-    ReportError(L"No se encontró ningún formato compatible entre ambas cámaras.");
+    ReportError(L"No se encontró ningún formato compatible entre ambas cámaras con más de 20 fps.");
 }
+
 
 
 
@@ -1426,8 +1444,8 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
 
     UINT32 width = 0, height = 0, fpsNum = 0, fpsDen = 0;
 
-    hr = MFGetAttributeSize(instance2->nativeVideoType, MF_MT_FRAME_SIZE, &width, &height);
-    hr = MFGetAttributeRatio(instance2->nativeVideoType, MF_MT_FRAME_RATE, &fpsNum, &fpsDen);
+    hr = MFGetAttributeSize(instance->nativeVideoType, MF_MT_FRAME_SIZE, &width, &height);
+    hr = MFGetAttributeRatio(instance->nativeVideoType, MF_MT_FRAME_RATE, &fpsNum, &fpsDen);
 
     // --- Parámetros de Video de Salida Compuesto ---
     UINT32 singleCamInputWidth = width;
@@ -1436,6 +1454,12 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     UINT32 finalOutputHeight = singleCamInputHeight * 2;
     UINT32 finalOutputFpsNum = fpsNum; // Numerador de FPS del video compuesto
     UINT32 finalOutputFpsDen = fpsDen;  // Denominador de FPS del video compuesto (ej: 30/1 = 30 FPS)
+    
+    // === Sincronizar baseTime ===
+    IMFSample* tmpSample = nullptr;
+    DWORD tmpFlags = 0;
+    LONGLONG videoSampleTime = 0;
+    LONGLONG audioSampleTime = 0;
 
     // Obtener activador de audio (si micIndex es válido)
     if (micFriendlyName) { // Asumo que micIndex < 0 significa no grabar audio
@@ -1554,11 +1578,34 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
         SAFE_RELEASE(audioReaderCurrentType);
     }
 
+
+    // Leer un sample de video (cam 1)
+    if (pReader) {
+        hr = pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &tmpFlags, &videoSampleTime, &tmpSample);
+        if (FAILED(hr)) goto error;
+        SAFE_RELEASE(tmpSample);
+    }
+
+    // Leer un sample de audio
+    if (g_ctx.audioReader) {
+        hr = g_ctx.audioReader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &tmpFlags, &audioSampleTime, &tmpSample);
+        if (FAILED(hr)) goto error;
+        SAFE_RELEASE(tmpSample);
+    }
+
+    // Tomar el menor como baseTime
+    if (videoSampleTime > 0 && audioSampleTime > 0)
+        g_ctx.baseTime = min(videoSampleTime, audioSampleTime);
+    else if (videoSampleTime > 0)
+        g_ctx.baseTime = videoSampleTime;
+    else if (audioSampleTime > 0)
+        g_ctx.baseTime = audioSampleTime;
+    else
+        g_ctx.baseTime = 0;
+
+
     // 9. Iniciar escritura del archivo .mp4
     hr = g_ctx.sinkWriter->BeginWriting(); CHECK_HR(hr, "SinkWriter->BeginWriting");
-
-    // Inicializar el tiempo base ANTES de iniciar los hilos
-    g_ctx.baseTime = -1; // Se inicializa a 0, y se ajustará con el primer SampleTime si es > 0
 
     g_ctx.isRecording.store(true); // Se marca como grabando antes de lanzar los hilos
 
@@ -1567,7 +1614,7 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
     {
         g_ctx.recordingThread = std::thread([
             finalOutputFpsNum, finalOutputFpsDen, finalOutputWidth, finalOutputHeight,
-            singleCamInputWidth, singleCamInputHeight, pReader, pReader2, instance, instance2]()
+            singleCamInputWidth, singleCamInputHeight, pReader, pReader2, instance, instance2, cameraFriendlyName, cameraFriendlyName2]()
             {
                 HRESULT hr_thread = S_OK;
                 DWORD streamIndex, flags;
@@ -1593,13 +1640,37 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                     IMFSample* pSample2 = nullptr;
 
                     hr_thread = pReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime, &pSample1);
-                    if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+                    if (FAILED(hr_thread)) {
+                        if (hr_thread == MF_E_HW_DISCONNECTED || hr_thread == MF_E_DEVICE_INVALIDATED || hr_thread == MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED) {
+                            StopRecording();
+                            StopPreview(cameraFriendlyName);
+                            StopPreview(cameraFriendlyName2);
+                            break;
+                        }
+                        else {
+                            ReportError(L"Error inesperado al leer muestra de cámara 1.");
+                            break;
+                        }
+                    }
+
+                    if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
 
                     hr_thread = pReader2->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &sampleTime2, &pSample2);
-                    if (FAILED(hr_thread) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+                    if (FAILED(hr_thread)) {
+                        if (hr_thread == MF_E_HW_DISCONNECTED || hr_thread == MF_E_DEVICE_INVALIDATED || hr_thread == MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED) {
+                            StopRecording();
+                            StopPreview(cameraFriendlyName);
+                            StopPreview(cameraFriendlyName2);
+                            break;
+                        }
+                        else {
+                            ReportError(L"Error inesperado al leer muestra de cámara 2.");
+                            break;
+                        }
+                    }
+                    if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
 
                     if (pSample1 && pSample2) {
-                        if (g_ctx.baseTime == -1 && sampleTime > 0) g_ctx.baseTime = sampleTime;
 
                         LONGLONG adjustedTime1 = (sampleTime - g_ctx.baseTime) - g_ctx.totalPausedDuration;
                         LONGLONG adjustedTime2 = (sampleTime2 - g_ctx.baseTime) - g_ctx.totalPausedDuration;
@@ -1707,9 +1778,6 @@ bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriend
                         SAFE_RELEASE(pSample);
                         continue; // Saltar este sample e intentar el siguiente
                     }
-
-                    // Solo inicializar baseTime una vez, idealmente por el primer stream que obtiene un tiempo
-                    if (g_ctx.baseTime == -1 && sampleTime > 0) g_ctx.baseTime.store(sampleTime);
 
                     // Usar la sampleDuration correctamente obtenida
                     LONGLONG adjustedTime = (sampleTime - g_ctx.baseTime) - g_ctx.totalPausedDuration;
