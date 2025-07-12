@@ -53,8 +53,7 @@ extern "C" {
     // Control de grabación
     __declspec(dllexport) bool StartRecording(wchar_t* cameraFriendlyName, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate);
     __declspec(dllexport) bool StartRecordingTwoCameras(wchar_t* cameraFriendlyName, wchar_t* cameraFriendlyName2, wchar_t* micFriendlyName, const wchar_t* outputPath, int bitrate);
-    __declspec(dllexport) bool PauseRecording();
-    __declspec(dllexport) bool ContinueRecording();
+    __declspec(dllexport) void FindCompatibleCommonFormat(wchar_t* selectedNameCam1, wchar_t* selectedNameCam2, int* indicesOut, int* countOut);
     __declspec(dllexport) bool StopRecording();
 
     // Obtener formatos de camara

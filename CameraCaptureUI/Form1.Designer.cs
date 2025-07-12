@@ -199,7 +199,7 @@
             // 
             this.labelStatusCam1.AutoSize = true;
             this.labelStatusCam1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.labelStatusCam1.Location = new System.Drawing.Point(181, 424);
+            this.labelStatusCam1.Location = new System.Drawing.Point(142, 424);
             this.labelStatusCam1.Name = "labelStatusCam1";
             this.labelStatusCam1.Size = new System.Drawing.Size(36, 15);
             this.labelStatusCam1.TabIndex = 22;
@@ -209,7 +209,7 @@
             // 
             this.labelStatusCam2.AutoSize = true;
             this.labelStatusCam2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.labelStatusCam2.Location = new System.Drawing.Point(518, 317);
+            this.labelStatusCam2.Location = new System.Drawing.Point(453, 316);
             this.labelStatusCam2.Name = "labelStatusCam2";
             this.labelStatusCam2.Size = new System.Drawing.Size(36, 15);
             this.labelStatusCam2.TabIndex = 23;

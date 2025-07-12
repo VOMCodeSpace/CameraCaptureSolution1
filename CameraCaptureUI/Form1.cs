@@ -329,7 +329,28 @@ namespace CameraCaptureUI
                                     {
                                         try
                                         {
-                                            isRecording2 = CameraInterop.StartRecordingTwoCameras(cameraFriendlyName, cameraFriendlyName2, selectedMic.Name, saveDialog.FileName, bitrate);
+                                            int[] indices = new int[2];
+                                            int count;
+                                            CameraInterop.FindCompatibleCommonFormat(selectedNameCam1, selectedNameCam2, indices, out count);
+                                            if (count == 2)
+                                            {
+                                                IntPtr hwnd1 = pictureBoxPreview.Handle;
+                                                pictureBoxPreview.Image = null;
+                                                pictureBoxPreview.Invalidate();
+                                                stopPreview(selectedNameCam1);
+
+                                                CameraInterop.StartPreview(selectedNameCam1, indices[0], hwnd1);
+
+                                                IntPtr hwnd2 = pictureBoxPreview2.Handle;
+                                                pictureBoxPreview2.Image = null;
+                                                pictureBoxPreview2.Invalidate();
+                                                stopPreview(selectedNameCam2);
+
+
+                                                CameraInterop.StartPreview(selectedNameCam2, indices[1], hwnd2);
+
+                                                isRecording2 = CameraInterop.StartRecordingTwoCameras(cameraFriendlyName, cameraFriendlyName2, selectedMic.Name, saveDialog.FileName, bitrate);
+                                            }
                                         }
                                         catch
                                         {
@@ -795,6 +816,9 @@ public static class CameraInterop
 
     [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
     public static extern bool StartRecordingTwoCameras(string cameraFriendlyName, string cameraFriendlyName2, string micFriendlyName, string outputPath, int bitrate);
+
+    [DllImport("CameraCaptureLib.dll", CharSet = CharSet.Unicode)]
+    public static extern void FindCompatibleCommonFormat(string selectedNameCam1, string selectedNameCam2, [Out] int[] indices, out int count);
 
     [DllImport("CameraCaptureLib.dll")]
     public static extern bool PauseRecording();
